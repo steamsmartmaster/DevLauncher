@@ -1,4 +1,4 @@
-# DevLauncher
+﻿# DevLauncher
 
 一个用 Python 构建的 Minecraft 启动器，面向模组开发者和整合包制作者。
 
@@ -77,6 +77,9 @@ DevLauncher/
 - CurseForge 下载需要 API Key
 - 部分旧版 Forge 安装器（MC < 1.13）使用不同的库结构
 
+## License
+
+MIT
 
 ---
 
@@ -150,3 +153,7 @@ DevLauncher/
 
 - CurseForge downloads require an API key
 - Some old Forge installers (MC < 1.13) use a different library structure
+
+## License
+
+MIT
