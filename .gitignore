@@ -13,3 +13,10 @@ env/
 *.log
 .idea/
 .vscode/
+*.zip
+*.jar
+*.png
+download_err.txt
+download_log.txt
+test_bg.py
+test_bg2.py
