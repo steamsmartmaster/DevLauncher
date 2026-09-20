@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4a4a4a"/>
+      <stop offset="40%" stop-color="#2b2b2b"/>
+      <stop offset="100%" stop-color="#0a0a0a"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="96" fill="url(#bgGradient)"/>
+
+  <g transform="translate(256, 200)">
+    <!-- 倾斜的字母 D -->
+    <g transform="rotate(-30) translate(-45, -20)">
+      <path d="M -90,-120 L 10,-120 C 80,-120 130,-70 130,0 C 130,70 80,120 10,120 L -90,120 Z M -35,-60 L -35,60 L 5,60 C 45,60 70,35 70,0 C 70,-35 45,-60 5,-60 Z" 
+            fill="#FFFFFF"/>
+    </g>
+
+    <!-- 下划线光标 _（往下移） -->
+    <rect x="2" y="160" width="170" height="48" rx="6" fill="#FFFFFF"/>
+  </g>
+</svg>

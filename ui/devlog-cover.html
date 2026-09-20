@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920, initial-scale=1.0">
+<title>DevLauncher Devlog Cover</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        background: #0a0a0f;
+    }
+
+    .container {
+        width: 1920px;
+        height: 1080px;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #1a1a2e 0%, #0a0a15 50%, #0d0d1a 100%);
+    }
+
+    /* 网格背景 */
+    .grid-bg {
+        position: absolute;
+        inset: 0;
+        background-image: 
+            linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+        background-size: 60px 60px;
+    }
+
+    /* 扫描线效果 */
+    .scanlines {
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 2px,
+            rgba(0,0,0,0.15) 2px,
+            rgba(0,0,0,0.15) 4px
+        );
+        pointer-events: none;
+    }
+
+    /* 左侧装饰光晕 */
+    .glow-left {
+        position: absolute;
+        left: -200px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 600px;
+        height: 600px;
+        background: radial-gradient(circle, rgba(100,100,255,0.08) 0%, transparent 70%);
+        border-radius: 50%;
+    }
+
+    .glow-right {
+        position: absolute;
+        right: -100px;
+        bottom: -100px;
+        width: 500px;
+        height: 500px;
+        background: radial-gradient(circle, rgba(150,100,255,0.06) 0%, transparent 70%);
+        border-radius: 50%;
+    }
+
+    /* 主内容区 */
+    .content {
+        position: relative;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 80px;
+        padding: 0 120px;
+    }
+
+    /* 左侧图标区 */
+    .icon-area {
+        flex-shrink: 0;
+    }
+
+    .icon-box {
+        width: 320px;
+        height: 320px;
+        background: linear-gradient(135deg, #3a3a3a 0%, #0a0a0a 100%);
+        border-radius: 64px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        box-shadow: 
+            0 0 80px rgba(100,100,255,0.1),
+            0 20px 60px rgba(0,0,0,0.5);
+    }
+
+    .icon-box::before {
+        content: '';
+        position: absolute;
+        inset: -2px;
+        border-radius: 66px;
+        background: linear-gradient(135deg, rgba(255,255,255,0.1), transparent 50%);
+        z-index: -1;
+    }
+
+    /* D_ 图标 */
+    .d-logo {
+        transform: scale(1.8);
+    }
+
+    /* 右侧文字区 */
+    .text-area {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+    }
+
+    .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(100,100,255,0.15);
+        border: 1px solid rgba(100,100,255,0.3);
+        border-radius: 20px;
+        padding: 8px 20px;
+        font-size: 16px;
+        color: #a0a0ff;
+        width: fit-content;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+    }
+
+    .tag::before {
+        content: '';
+        width: 8px;
+        height: 8px;
+        background: #6060ff;
+        border-radius: 50%;
+        box-shadow: 0 0 10px #6060ff;
+    }
+
+    .title {
+        font-size: 96px;
+        font-weight: 800;
+        color: #ffffff;
+        line-height: 1.1;
+        letter-spacing: -2px;
+    }
+
+    .title span {
+        background: linear-gradient(135deg, #ffffff 0%, #a0a0ff 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    .subtitle {
+        font-size: 32px;
+        color: rgba(255,255,255,0.5);
+        font-weight: 300;
+        letter-spacing: 4px;
+    }
+
+    /* 终端装饰 */
+    .terminal-deco {
+        position: absolute;
+        right: 100px;
+        top: 80px;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 16px;
+        padding: 24px 32px;
+        font-family: 'Consolas', 'Courier New', monospace;
+        font-size: 18px;
+        color: rgba(255,255,255,0.25);
+        line-height: 1.8;
+    }
+
+    .terminal-deco .prompt {
+        color: #6060ff;
+    }
+
+    .terminal-deco .cmd {
+        color: rgba(255,255,255,0.4);
+    }
+
+    .terminal-deco .cursor {
+        display: inline-block;
+        width: 10px;
+        height: 20px;
+        background: rgba(255,255,255,0.4);
+        animation: blink 1s infinite;
+        vertical-align: text-bottom;
+    }
+
+    @keyframes blink {
+        0%, 50% { opacity: 1; }
+        51%, 100% { opacity: 0; }
+    }
+
+    /* 底部装饰线 */
+    .bottom-line {
+        position: absolute;
+        bottom: 60px;
+        left: 120px;
+        right: 120px;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1) 20%, rgba(255,255,255,0.1) 80%, transparent);
+    }
+
+    .bottom-text {
+        position: absolute;
+        bottom: 30px;
+        left: 120px;
+        font-size: 14px;
+        color: rgba(255,255,255,0.2);
+        letter-spacing: 4px;
+    }
+
+    /* 版本号装饰 */
+    .version-badge {
+        position: absolute;
+        top: 80px;
+        left: 120px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 14px;
+        color: rgba(255,255,255,0.3);
+        letter-spacing: 2px;
+    }
+
+    .version-badge .dot {
+        width: 6px;
+        height: 6px;
+        background: #4ade80;
+        border-radius: 50%;
+        box-shadow: 0 0 10px #4ade80;
+    }
+
+    /* 右下角特性列表 */
+    .features {
+        position: absolute;
+        right: 100px;
+        bottom: 80px;
+        display: flex;
+        gap: 32px;
+    }
+
+    .feature {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        color: rgba(255,255,255,0.3);
+    }
+
+    .feature .icon {
+        width: 32px;
+        height: 32px;
+        background: rgba(255,255,255,0.05);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .feature .icon svg {
+        width: 16px;
+        height: 16px;
+        stroke: rgba(255,255,255,0.4);
+        fill: none;
+        stroke-width: 2;
+    }
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="grid-bg"></div>
+    <div class="scanlines"></div>
+    <div class="glow-left"></div>
+    <div class="glow-right"></div>
+
+    <!-- 版本号 -->
+    <div class="version-badge">
+        <span class="dot"></span>
+        DEVLOG 2026
+    </div>
+
+    <!-- 终端装饰 -->
+    <div class="terminal-deco">
+        <div><span class="prompt">D_</span> <span class="cmd">./launch --version 1.20.1</span></div>
+        <div><span class="prompt">D_</span> <span class="cmd">forge install 14.23.5.2864</span></div>
+        <div><span class="prompt">D_</span> <span class="cmd">fabric --latest</span></div>
+        <div><span class="prompt">D_</span> <span class="cmd">mod install jei</span></div>
+        <div><span class="prompt">D_</span> <span class="cursor"></span></div>
+    </div>
+
+    <!-- 主内容 -->
+    <div class="content">
+        <!-- 左侧图标 -->
+        <div class="icon-area">
+            <div class="icon-box">
+                <svg class="d-logo" viewBox="0 0 512 512" width="200" height="200">
+                    <defs>
+                        <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#4a4a4a"/>
+                            <stop offset="40%" stop-color="#2b2b2b"/>
+                            <stop offset="100%" stop-color="#0a0a0a"/>
+                        </linearGradient>
+                    </defs>
+                    <rect width="512" height="512" rx="96" fill="url(#bgGrad)"/>
+                    <g transform="translate(256, 200)">
+                        <g transform="rotate(-30) translate(-45, -20)">
+                            <path d="M -90,-120 L 10,-120 C 80,-120 130,-70 130,0 C 130,70 80,120 10,120 L -90,120 Z M -35,-60 L -35,60 L 5,60 C 45,60 70,35 70,0 C 70,-35 45,-60 5,-60 Z" fill="#FFFFFF"/>
+                        </g>
+                        <rect x="2" y="160" width="170" height="48" rx="6" fill="#FFFFFF"/>
+                    </g>
+                </svg>
+            </div>
+        </div>
+
+        <!-- 右侧文字 -->
+        <div class="text-area">
+            <div class="tag">Minecraft Launcher</div>
+            <div class="title"><span>DevLauncher</span></div>
+            <div class="subtitle">从零构建 Minecraft 启动器</div>
+        </div>
+    </div>
+
+    <!-- 底部 -->
+    <div class="bottom-line"></div>
+    <div class="bottom-text">PYTHON + PYQT6 + MINECRAFT-LAUNCHER-LIB</div>
+
+    <!-- 右下角特性 -->
+    <div class="features">
+        <div class="feature">
+            <div class="icon">
+                <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            </div>
+            <span>Mod Loader</span>
+        </div>
+        <div class="feature">
+            <div class="icon">
+                <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+            </div>
+            <span>Mod Manager</span>
+        </div>
+        <div class="feature">
+            <div class="icon">
+                <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <span>MSA Login</span>
+        </div>
+    </div>
+</div>
+</body>
+</html>

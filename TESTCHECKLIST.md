@@ -1,0 +1,39 @@
+# DevLauncher Test Checklist
+
+## 1. 整合包导入 — client-overrides 支持
+- [ ] 导入包含 `client-overrides/` 的 .mrpack 文件（如 NON 整合包）
+- [ ] 验证 `client-overrides/mods/` 下的 jar 文件被正确解压到 `versions/<name>/mods/`
+- [ ] 验证 `client-overrides/config/` 下的配置文件被正确解压
+- [ ] 验证 `client-overrides/needsofnature/` 等子目录资源包被正确解压
+- [ ] 导入后启动游戏，确认所有模组加载正常（无缺失模组）
+- [ ] 对比 HMCL 导入同一整合包的 mods 目录，确认文件一致
+
+## 2. 整合包格式检测
+- [ ] 导入 `client-overrides/modrinth.index.json` 的 mrpack，确认被识别为 Modrinth 格式
+- [ ] 导入 `overrides/modrinth.index.json` 的 mrpack，确认被识别为 Modrinth 格式
+- [ ] 导入 `modrinth.index.json` 在根目录的 mrpack，确认被识别为 Modrinth 格式
+
+## 3. 导入弹窗 UI
+- [ ] 打开导入弹窗，确认显示整合包信息（名称、MC版本、加载器、模组数量）
+- [ ] 点击导入后，确认显示 HMCL 风格进度界面
+- [ ] 进度界面显示步骤图标（→）、步骤标题、步骤副标题（含文件计数）
+- [ ] 文件列表显示正在下载的文件（带进度条），已下载的文件显示 ✓
+- [ ] 下载完成后步骤图标变为 ✓
+- [ ] 导入过程中无法关闭弹窗（modpackImporting 锁定）
+- [ ] 导入完成后自动关闭弹窗，版本列表刷新
+
+## 4. 导入整合包按钮图标
+- [ ] 版本页面右上角「导入整合包」按钮显示正确的 SVG 图标（箭头+碗状）
+- [ ] 图标与文字间距正常，不拥挤
+
+## 5. 侧边栏 Logo
+- [ ] 侧边栏顶部 D_ logo 的 D 和 _ 之间有足够间距
+- [ ] Logo 在 48x48 尺寸下清晰可辨
+
+## 6. 已有功能回归
+- [ ] 版本列表正常显示
+- [ ] 模组管理页面正常加载模组列表
+- [ ] 模组下载/安装功能正常
+- [ ] 游戏启动功能正常
+- [ ] 版本隔离切换正常
+- [ ] 主题切换正常
