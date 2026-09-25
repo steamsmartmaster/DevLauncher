@@ -74,47 +74,44 @@ class VersionManager:
 
     def get_installed_versions(self) -> list[dict]:
         """Get list of installed Minecraft versions with details.
-        Skips vanilla versions auto-downloaded as modpack dependencies
-        (no devlauncher.cfg and not referenced by any modpack's inheritsFrom).
+
+        Shows user-managed versions (devlauncher.cfg) and modpack versions
+        (inheritsFrom). Vanilla versions auto-downloaded as modpack
+        dependencies are hidden: they have neither, and the modpack entry
+        that needs them is listed instead.
         """
         versions = []
         versions_dir = Path(self.minecraft_dir) / "versions"
         if not versions_dir.exists():
             return versions
-        
-        # First pass: collect all version data and find modpack parent references
-        all_versions = []
-        parent_refs = set()
+
         for v_dir in versions_dir.iterdir():
-            if v_dir.is_dir():
-                json_file = v_dir / f"{v_dir.name}.json"
-                cfg_file = v_dir / "devlauncher.cfg"
-                if json_file.exists():
-                    try:
-                        with open(json_file, "r", encoding="utf-8-sig") as f:
-                            version_data = json.load(f)
-                        inherits_from = version_data.get("inheritsFrom", "")
-                        all_versions.append({
-                            "id": v_dir.name,
-                            "type": version_data.get("type", "unknown"),
-                            "releaseTime": version_data.get("releaseTime", ""),
-                            "inheritsFrom": inherits_from,
-                            "has_cfg": cfg_file.exists()
-                        })
-                        if inherits_from:
-                            parent_refs.add(inherits_from)
-                    except Exception as e:
-                        logger.warning(f"跳过版本 {v_dir.name}: {e}")
-        
-        # Second pass: filter out auto-downloaded vanilla dependencies
-        for v in all_versions:
-            # Keep if: has devlauncher.cfg (user-managed), or is a modpack (has inheritsFrom)
-            if v["has_cfg"] or v["inheritsFrom"]:
-                versions.append(v)
-            # Keep if: this vanilla version is referenced by an installed modpack
-            elif v["id"] in parent_refs:
-                versions.append(v)
-        
+            if not v_dir.is_dir():
+                continue
+            json_file = v_dir / f"{v_dir.name}.json"
+            if not json_file.exists():
+                continue
+            try:
+                with open(json_file, "r", encoding="utf-8-sig") as f:
+                    version_data = json.load(f)
+            except Exception as e:
+                logger.warning(f"跳过版本 {v_dir.name}: {e}")
+                continue
+
+            inherits_from = version_data.get("inheritsFrom", "")
+            has_cfg = (v_dir / "devlauncher.cfg").exists()
+            # Keep user-managed versions and modpacks; hide auto-downloaded
+            # vanilla parents regardless of whether a pack references them.
+            if not (has_cfg or inherits_from):
+                continue
+            versions.append({
+                "id": v_dir.name,
+                "type": version_data.get("type", "unknown"),
+                "releaseTime": version_data.get("releaseTime", ""),
+                "inheritsFrom": inherits_from,
+                "has_cfg": has_cfg
+            })
+
         return versions
 
     def get_installed_version_ids(self) -> list[str]:

@@ -16,6 +16,13 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import QUrl, pyqtSlot, QObject, pyqtSignal, QTimer
 from PyQt6.QtWebChannel import QWebChannel
 
+try:
+    import minecraft_launcher_lib
+except ImportError:
+    minecraft_launcher_lib = None
+    logger = logging.getLogger("DevLauncher")
+    logger.warning("未安装 minecraft-launcher-lib，原版下载功能将不可用")
+
 from launcher_core import AuthManager, VersionManager, GameLauncher, Settings, ModManager, modrinth_api, curseforge_api
 from launcher_core.api_modloaders import (
     MOD_LOADER_APIS, LOADER_DISPLAY_NAMES,
@@ -425,6 +432,12 @@ class LauncherBridge(QObject):
                     "setStatus": on_status,
                 })
                 logger.info(f"版本安装完成: {version_id} (共下载 {file_count[0]} 个文件)")
+                # Mark user-initiated installs as user-managed (devlauncher.cfg)
+                # so they stay visible in the version list; auto-downloaded
+                # modpack parent versions have no cfg and stay hidden.
+                v_path = self.versions.get_version_path(version_id)
+                if v_path and not (v_path / "devlauncher.cfg").exists():
+                    self.versions.get_version_setting(version_id).set("isolation", False)
                 self.gameStateChanged.emit("idle", "")
                 self.installComplete.emit(version_id)
             except Exception as e:

@@ -115,3 +115,15 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - 重建离线测试套件（临时文件丢失后重写）：4 条流程 + 不支持格式 全过
   - 断言字节级进度（存在 `progress=50` 的 downloading 状态快照）、文件计数单调、下载后粘性计数、`_ensure_vanilla_version` 按 MC 版本调用、`install_mod_loader` 收到 `(loader, 版本名, loader_ver, minecraft_dir)`、fabric 内联 JSON 分支不触发安装器
 - `python -m py_compile`（main + 4 个 launcher_core 模块）+ `node --check`（提取 `<script>`）通过
+
+### 修复：版本列表出现"幽灵原版"（导入多一个 1.21.11、删包又跟着消失）
+导入 1.21.11 整合包后列表同时出现 `NON-1.21.11` 和 `1.21.11`；删除整合包后 `1.21.11` 条目也从列表消失（目录仍在磁盘）。根因：`get_installed_versions()` 的过滤里有一条 `elif v["id"] in parent_refs: append` —— 被某个整合包 `inheritsFrom` 引用的原版父版本会被放行显示；删包后引用消失，同一目录又被隐藏，于是"出现/消失"都跟着整合包走（实机日志：删 NON-1.21.11 时已安装计数 5→3，掉了两个）。
+
+**改动：**
+- `launcher_core/versions.py` — 过滤规则简化为：**有 `devlauncher.cfg`（用户管理）或有 `inheritsFrom`（整合包）才显示**；其余（自动补装的原版父版本）无论是否被引用一律隐藏；删除 parent_refs 引用收集逻辑
+- `main.py` — `installVersion()` 成功后若版本尚无 `devlauncher.cfg` 则写入（`isolation: false`）：用户主动安装/修复的原版从此在列表可见（此前无 cfg 的原版安装同样会被误隐藏）；同时是"想单独保留这个原版"的入口——下载页点安装即转正
+- 删除天然只动本体：`delete_version()` 只移动单个版本目录（回归验证：删包后父版本目录完好、`_removed` 里只有包）
+
+**验证：**
+- 新增离线测试 `version-list-filter`：引用中的父版本隐藏、孤儿父版本隐藏、带 cfg 版本可见、删包不级联、写 cfg 转正 —— 6/6 全过
+- 实机 `.minecraft` 复查：可见 = 1.12.2 / 1.4.5 / Fabulously Optimized 10.2.2（1.20.1、1.20.2、1.21.11 幽灵目录保持隐藏）
