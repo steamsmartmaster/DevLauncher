@@ -184,4 +184,11 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 
 **验证**：`py_compile`；提取 `<script>` `node --check`；`test_toggle_local.js`（applyLocalToggle）PASS；git diff 逐块复核——期间曾误删导入按钮 SVG 第二段圆弧（`A 2 2 0 0 0 18 21`），已还原并与 `ui/icon-modpack-import.svg` 一致
 
-**注意（测试资产丢失）**：`%TEMP%\opencode` 下的历史测试资产（`test_import_flows.py` 9 用例、`replay_progress.js`、`dump_reports.py`、`replay_reports.json`）被系统清理删除，回收站无副本；`test_toggle_local.js` 已凭本会话内容原样重建，其余待从源码重建。
+**注意（测试资产丢失）**：`%TEMP%\opencode` 下的历史测试资产（`test_import_flows.py` 9 用例、`replay_progress.js`、`dump_reports.py`、`replay_reports.json`）被系统清理删除，回收站无副本。
+
+### 重建：离线测试套件（2026-09-25 恢复）
+
+- `test_import_flows.py` 已按源码侦察报告（`import_modpack` 6 参回调/各格式解析/网络接缝 + `versions.py` 过滤规则）完整重建：4 条导入流程（Modrinth/CurseForge/MultiMC/client-overrides）全离线跑通——原版父版本预置走 fast-path、`download_session`/CF 文件 API 假会话、`install_mod_loader` 捕获为 `(loader, 版本名, loader_ver)`；断言含预注册 queued+size、85/90/100 阶段值、overrides 提取、retry 进度不回退（seq 非降）、版本过滤/删除不连带/cfg 认领显形，外加本会话新增的 `_mod_cache_key`、`ModLoadScheduler` 两用例
+- **结果：9/9 ALL PASS**（一次性通过——用例基于完整源码侦察重建，非新特性 TDD）
+- `test_toggle_local.js`（applyLocalToggle）凭本会话内容原样重建并 PASS
+- 未重建：`replay_progress.js` / `dump_reports.py` / `replay_reports.json`（依赖真实整合包归档生成的报告流；JS 进度单调性断言已部分由套件的 retry/states 断言覆盖，需要时可再重建）
