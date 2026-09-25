@@ -173,3 +173,15 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - `ui/index.html`：`toggleMod` 乐观更新——本地立刻翻转 `enabled`/`filename`、就地修补该行（复选框、禁用/启用按钮、`data-filename`），再调 Python；`applyLocalToggle` 纯函数双向改名，连点时发给后端的文件名永远正确；`deleteModConfirm` 乐观移除行；`renderModList` 保留滚动位置 + 30 个一批分帧渲染（大列表不再冻结）+ 渲染代次防旧批次续写；`navigateTo` 对版本模组/世界/资源包页先出骨架屏；按钮 HTML 抽成 `modActionsHtml` 供渲染与就地修补共用
 
 **验证**：红→绿 TDD —— Python 先 2 FAILED（`_mod_cache_key` 改名稳定性、`ModLoadScheduler` 合并/链式）再实现；node `applyLocalToggle` 先 RED（marker not found）后绿；套件 9/9 ALL PASS；`py_compile`；提取 `<script>` `node --check`；进度重放 5 场景无 dip、remOK=true
+
+### 新增：收起按钮（窗口 → 细条）（2026-09-25 新增）
+
+**需求**：版本页工具栏"导入整合包"左侧、导入弹窗底栏"导入中..."左侧各放一个"收起"按钮；点击把主窗口收成细条（当前选择 + 启动游戏），后台任务（导入/下载）继续。
+
+**实现**：
+- `ui/index.html`：`body.app-collapsed` 隐藏背景层与 `.app-container`、显示 `.window-strip`（展开按钮 ⤢ / 当前选择 label+版本名 / 启动游戏按钮，固定铺满视口）；`collapseAppWindow()`/`expandAppWindow()` 切换类并调 Python 槽；`syncStripLaunch()` 把主启动按钮的 class/innerHTML/disabled/onclick 镜像到细条副本，在 `updateLaunchButton` 末尾与收起时调用；`selectVersion` 同步细条版本名；工具栏与弹窗底栏各插入一个"收起"按钮（minimize-2 图标，沿用 `settings-file-btn` 样式）
+- `main.py`：`LauncherBridge.collapseWindow/expandWindow` 槽 → `MainWindow.collapse_to_strip/restore_from_strip`（首次收起保存 geometry，最小尺寸 1200×700 ↔ 440×78，展开时 `setGeometry` 恢复原位）
+
+**验证**：`py_compile`；提取 `<script>` `node --check`；`test_toggle_local.js`（applyLocalToggle）PASS；git diff 逐块复核——期间曾误删导入按钮 SVG 第二段圆弧（`A 2 2 0 0 0 18 21`），已还原并与 `ui/icon-modpack-import.svg` 一致
+
+**注意（测试资产丢失）**：`%TEMP%\opencode` 下的历史测试资产（`test_import_flows.py` 9 用例、`replay_progress.js`、`dump_reports.py`、`replay_reports.json`）被系统清理删除，回收站无副本；`test_toggle_local.js` 已凭本会话内容原样重建，其余待从源码重建。

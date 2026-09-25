@@ -1814,6 +1814,65 @@
             0% { background-position: 40px 0; }
             100% { background-position: 0 0; }
         }
+
+        /* Collapsed window: slim strip (当前选择 + 启动游戏) */
+        .window-strip { display: none; }
+        body.app-collapsed { overflow: hidden; }
+        body.app-collapsed .background-layer,
+        body.app-collapsed .app-container { display: none !important; }
+        body.app-collapsed .window-strip {
+            display: flex;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            align-items: center;
+            gap: 14px;
+            padding: 0 14px;
+            background: rgba(10, 13, 18, 0.98);
+            z-index: 9999;
+        }
+        .window-strip .strip-expand {
+            width: 32px;
+            height: 32px;
+            flex: none;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.06);
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 15px;
+            line-height: 1;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+        .window-strip .strip-expand:hover { background: rgba(255, 255, 255, 0.14); }
+        .window-strip .strip-selection { flex: 1; min-width: 0; }
+        .window-strip .strip-label {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.45);
+            line-height: 1.3;
+        }
+        .window-strip .strip-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.92);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.4;
+        }
+        body.app-collapsed .window-strip .launch-btn {
+            width: auto;
+            flex: none;
+            padding: 10px 18px;
+            font-size: 14px;
+            border-radius: 8px;
+        }
+        body.app-collapsed .window-strip .launch-btn:hover:not(:disabled) {
+            transform: none;
+            box-shadow: none;
+        }
     </style>
 </head>
 <body>
@@ -1882,7 +1941,8 @@
 
             <div class="content-area">
                 <div class="page active" id="versionsPage">
-                    <div style="margin-bottom:12px;text-align:right;">
+                    <div style="margin-bottom:12px;display:flex;justify-content:flex-end;gap:8px;">
+                        <button class="settings-file-btn" onclick="collapseAppWindow()" title="收起到细条，后台继续运行" style="display:inline-flex;align-items:center;gap:6px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>收起</button>
                         <button class="settings-file-btn" onclick="triggerModpackImport()" style="background:rgba(76,175,80,0.2);border-color:rgba(76,175,80,0.4);display:inline-flex;align-items:center;gap:6px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M 6 7 L 11 7 Q 13.5 7 13.5 9.5 L 13.5 12 L 21 12 L 12 18 L 3 12 L 10.5 12 L 10.5 9.5 Q 10.5 7 8.5 7 Z"/><path d="M 6 19 L 6 21 A 2 2 0 0 0 8 23 L 16 23 A 2 2 0 0 0 18 21 L 18 19"/></svg>导入整合包</button>
                     </div>
                     <div class="version-grid" id="versionGrid">
@@ -2124,6 +2184,7 @@
                             <div id="modpackImportResult" style="display:none;"></div>
                         </div>
                         <div class="modal-footer" style="padding:12px 16px;border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:flex-end;gap:8px;">
+                            <button class="settings-file-btn" onclick="collapseAppWindow()" title="收起窗口，导入在后台继续" style="display:inline-flex;align-items:center;gap:6px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>收起</button>
                             <button class="settings-file-btn" id="modpackImportCancelBtn" onclick="closeModpackImportModal()">取消</button>
                             <button class="settings-file-btn" id="modpackImportConfirmBtn" onclick="confirmModpackImport()" style="background:var(--accent-color,#4fc3f7);color:#000;">导入</button>
                         </div>
@@ -2515,8 +2576,21 @@
     </div>
 
     <div class="toast" id="toast">
-        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
         <span id="toastMessage"></span>
+    </div>
+
+    <!-- Slim strip shown when the window is collapsed -->
+    <div class="window-strip" id="windowStrip">
+        <button class="strip-expand" onclick="expandAppWindow()" title="展开窗口">&#x2922;</button>
+        <div class="strip-selection">
+            <div class="strip-label">当前选择</div>
+            <div class="strip-name" id="stripVersionName">-</div>
+        </div>
+        <button class="launch-btn" id="stripLaunchBtn" onclick="launchGame()" disabled>
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <span>启动游戏</span>
+        </button>
     </div>
 
     <script>
@@ -2912,6 +2986,8 @@
             
             document.getElementById('selectedVersionName').textContent = versionId;
             document.getElementById('selectedVersionType').textContent = v ? v.type : '';
+            var stripNameEl = document.getElementById('stripVersionName');
+            if (stripNameEl) stripNameEl.textContent = versionId;
             document.getElementById('launchBtn').disabled = false;
             
             // Track current version for downloads
@@ -4948,6 +5024,43 @@
                     btn.onclick = function() { launchGame(); };
                     break;
             }
+            syncStripLaunch();
+        }
+
+        // --- collapsed window (slim strip) --------------------------------
+        function collapseAppWindow() {
+            if (document.body.classList.contains('app-collapsed')) return;
+            document.body.classList.add('app-collapsed');
+            var src = document.getElementById('selectedVersionName');
+            var stripName = document.getElementById('stripVersionName');
+            if (src && stripName) stripName.textContent = src.textContent;
+            syncStripLaunch();
+            if (pythonInterface && pythonInterface.collapseWindow) {
+                pythonInterface.collapseWindow();
+            }
+        }
+
+        function expandAppWindow() {
+            if (!document.body.classList.contains('app-collapsed')) return;
+            document.body.classList.remove('app-collapsed');
+            if (pythonInterface && pythonInterface.expandWindow) {
+                pythonInterface.expandWindow();
+            }
+        }
+
+        // Mirror the main launch button's state/icon/text onto the strip copy
+        function syncStripLaunch() {
+            var btn = document.getElementById('launchBtn');
+            var stripBtn = document.getElementById('stripLaunchBtn');
+            if (!btn || !stripBtn) return;
+            stripBtn.className = btn.className;
+            stripBtn.innerHTML = btn.innerHTML;
+            if (btn.hasAttribute('disabled')) {
+                stripBtn.setAttribute('disabled', 'disabled');
+            } else {
+                stripBtn.removeAttribute('disabled');
+            }
+            stripBtn.onclick = btn.onclick;
         }
 
         function killGame() {
