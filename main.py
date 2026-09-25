@@ -726,6 +726,11 @@ class LauncherBridge(QObject):
                 self.gameStateChanged.emit("idle", "")
             except Exception as e:
                 logger.error(f"导入整合包失败: {e}", exc_info=True)
+                # Always complete so the modal never gets stuck in "importing" state
+                self.modpackImportComplete.emit(json.dumps({
+                    'success': False, 'error': str(e)
+                }))
+                self.gameStateChanged.emit("idle", "")
                 self.errorOccurred.emit(f"导入整合包失败: {e}")
         threading.Thread(target=_do_import, daemon=True).start()
 
@@ -736,13 +741,33 @@ class LauncherBridge(QObject):
         def _do_redownload():
             try:
                 importer = ModpackImporter(self.versions.minecraft_dir)
-                result = importer.redownload_modpack_mods(version_id)
+
+                def progress_callback(current, total, message, file_downloaded=0, file_total=0, file_states=None):
+                    detail = json.dumps({
+                        "current": current, "total": total, "message": message,
+                        "file_downloaded": file_downloaded, "file_total": file_total,
+                        "files": file_states or []
+                    })
+                    self.modpackImportProgress.emit(detail)
+                    # Also drive the sidebar download panel (modal may be closed)
+                    button_detail = json.dumps({
+                        "message": message,
+                        "button_text": "正在下载整合包模组",
+                        "file_downloaded": file_downloaded,
+                        "file_total": file_total,
+                        "files": file_states or []
+                    })
+                    self.gameStateChanged.emit("installing", button_detail)
+
+                result = importer.redownload_modpack_mods(version_id, progress_callback)
+                self.gameStateChanged.emit("idle", "")
                 if result.get('success'):
                     logger.info(f"整合包模组下载完成: {result.get('downloaded', 0)}/{result.get('total', 0)}")
                     # Reload mods list
                     self.loadMods(version_id)
                 else:
-                    self.errorOccurred.emit(f"下载整合包模组失败: {result.get('error', '未知错误')}")
+                    err = result.get('error') or '; '.join(result.get('errors', [])[:3]) or '未知错误'
+                    self.errorOccurred.emit(f"下载整合包模组失败: {err}")
             except Exception as e:
                 logger.error(f"重新下载整合包模组失败: {e}", exc_info=True)
                 self.errorOccurred.emit(f"重新下载整合包模组失败: {e}")

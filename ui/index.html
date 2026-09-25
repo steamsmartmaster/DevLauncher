@@ -2121,7 +2121,7 @@
                             <div id="modpackImportResult" style="display:none;"></div>
                         </div>
                         <div class="modal-footer" style="padding:12px 16px;border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:flex-end;gap:8px;">
-                            <button class="settings-file-btn" onclick="closeModpackImportModal()">取消</button>
+                            <button class="settings-file-btn" id="modpackImportCancelBtn" onclick="closeModpackImportModal()">取消</button>
                             <button class="settings-file-btn" id="modpackImportConfirmBtn" onclick="confirmModpackImport()" style="background:var(--accent-color,#4fc3f7);color:#000;">导入</button>
                         </div>
                     </div>
@@ -3755,6 +3755,10 @@
         var modpackImporting = false;
 
         function triggerModpackImport() {
+            if (modpackImporting) {
+                showToast('已有整合包正在导入中，请等待完成', 'info');
+                return;
+            }
             if (pythonInterface && pythonInterface.selectModpackFile) {
                 pythonInterface.selectModpackFile();
             } else {
@@ -3763,6 +3767,10 @@
         }
 
         function onModpackFileSelectedFromPython(filePath) {
+            if (modpackImporting) {
+                showToast('已有整合包正在导入中，请等待完成', 'info');
+                return;
+            }
             pendingModpackPath = filePath;
             
             document.getElementById('modpackImportModal').style.display = 'flex';
@@ -3770,6 +3778,7 @@
             document.getElementById('modpackImportProgress').style.display = 'none';
             document.getElementById('modpackImportResult').style.display = 'none';
             document.getElementById('modpackImportConfirmBtn').style.display = '';
+            resetModpackImportCancelBtn();
             
             if (pythonInterface && pythonInterface.getModpackInfo) {
                 pythonInterface.getModpackInfo(pendingModpackPath);
@@ -3777,6 +3786,11 @@
         }
 
         function onModpackFileSelected(event) {
+            if (modpackImporting) {
+                showToast('已有整合包正在导入中，请等待完成', 'info');
+                event.target.value = '';
+                return;
+            }
             var file = event.target.files[0];
             if (!file) return;
             
@@ -3789,6 +3803,7 @@
             document.getElementById('modpackImportProgress').style.display = 'none';
             document.getElementById('modpackImportResult').style.display = 'none';
             document.getElementById('modpackImportConfirmBtn').style.display = '';
+            resetModpackImportCancelBtn();
             
             if (pythonInterface && pythonInterface.getModpackInfo) {
                 pythonInterface.getModpackInfo(pendingModpackPath);
@@ -3814,6 +3829,7 @@
         }
 
         function confirmModpackImport() {
+            if (modpackImporting) return;
             var versionName = document.getElementById('modpackImportVersionName').value.trim();
             if (!versionName) {
                 showToast('请输入版本名称', 'error');
@@ -3823,38 +3839,57 @@
             document.getElementById('modpackImportInfo').style.display = 'none';
             document.getElementById('modpackImportProgress').style.display = 'block';
             document.getElementById('modpackImportConfirmBtn').style.display = 'none';
+            // Lock the modal: import thread can't be aborted, a reopen would start a second import
+            var cancelBtn = document.getElementById('modpackImportCancelBtn');
+            if (cancelBtn) { cancelBtn.setAttribute('disabled', 'disabled'); cancelBtn.textContent = '导入中...'; }
             modpackImporting = true;
+            modpackImportLastFileCount = { downloaded: 0, total: 0 };
             
             if (pythonInterface && pythonInterface.importModpack) {
                 pythonInterface.importModpack(pendingModpackPath, versionName);
             }
         }
 
+        var modpackImportLastFileCount = { downloaded: 0, total: 0 };
+
         function updateModpackImportProgress(current, total, message, file_downloaded, file_total, file_states) {
-            var display_total = file_total || total;
-            var display_downloaded = file_downloaded || current;
-            
-            // Update step subtitle with count
+            // Prefer file-level counts (mod downloads). Fall back to overall only when no file counts seen yet.
+            var display_total, display_downloaded;
+
+            if (file_total > 0) {
+                display_total = file_total;
+                display_downloaded = file_downloaded;
+                modpackImportLastFileCount = { downloaded: file_downloaded, total: file_total };
+            } else if (modpackImportLastFileCount.total > 0) {
+                // Post-download phase (extract/config): keep last completed mod count, don't jump to 85/100
+                display_total = modpackImportLastFileCount.total;
+                display_downloaded = modpackImportLastFileCount.downloaded;
+            } else {
+                display_total = total;
+                display_downloaded = current;
+            }
+
             var subtitle = document.getElementById('modpackImportStepSubtitle');
             if (subtitle) {
                 if (display_total > 0) {
+                    // Phase label + stable count so it never looks like it restarts from 1
                     subtitle.textContent = (message || '下载必要文件') + ' — ' + display_downloaded + '/' + display_total;
                 } else {
                     subtitle.textContent = message || '准备中...';
                 }
             }
-            
-            // Show step as complete if all done
-            if (display_total > 0 && display_downloaded >= display_total) {
+
+            // Show step as complete if all file downloads done
+            if (modpackImportLastFileCount.total > 0 &&
+                modpackImportLastFileCount.downloaded >= modpackImportLastFileCount.total) {
                 var icon = document.getElementById('modpackImportStepIcon');
                 if (icon) icon.textContent = '✓';
             }
-            
+
             // Render file list with per-file progress bars
             var fileList = document.getElementById('modpackImportFileList');
             if (fileList && file_states && file_states.length > 0) {
                 var html = '';
-                // Show all files (downloading first, then done, limit to 15 visible)
                 var downloading = file_states.filter(function(f) { return f.status === 'downloading'; });
                 var doneFiles = file_states.filter(function(f) { return f.status === 'done'; });
                 var errorFiles = file_states.filter(function(f) { return f.status === 'error'; });
@@ -3880,6 +3915,7 @@
 
         function onModpackImportComplete(result) {
             modpackImporting = false;
+            resetModpackImportCancelBtn();
             document.getElementById('modpackImportProgress').style.display = 'none';
             var resultDiv = document.getElementById('modpackImportResult');
             resultDiv.style.display = 'block';
@@ -3917,9 +3953,19 @@
         }
 
         function closeModpackImportModal() {
+            if (modpackImporting) {
+                showToast('整合包正在导入中，请等待完成', 'info');
+                return;
+            }
             document.getElementById('modpackImportModal').style.display = 'none';
             pendingModpackPath = '';
-            modpackImporting = false;
+            modpackImportLastFileCount = { downloaded: 0, total: 0 };
+            resetModpackImportCancelBtn();
+        }
+
+        function resetModpackImportCancelBtn() {
+            var cancelBtn = document.getElementById('modpackImportCancelBtn');
+            if (cancelBtn) { cancelBtn.removeAttribute('disabled'); cancelBtn.textContent = '取消'; }
         }
 
         function updateModVersions(data) {

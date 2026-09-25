@@ -57,6 +57,22 @@ class ModpackImporter:
             "x-api-key": curseforge_api_key,
             "Accept": "application/json"
         })
+        # Pool size >= max_workers so parallel downloads reuse connections
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=32,
+            pool_maxsize=32,
+            max_retries=0,
+        )
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
+        # Separate session for file downloads: no API key / Accept headers
+        # are sent to CDNs (Modrinth, CurseForge media, Maven, ...)
+        self.download_session = requests.Session()
+        self.download_session.headers.update({
+            "User-Agent": "DevLauncher/1.0"
+        })
+        self.download_session.mount("https://", adapter)
+        self.download_session.mount("http://", adapter)
 
     def detect_format(self, zip_path: str) -> str:
         """Detect modpack format from ZIP contents.
@@ -154,10 +170,22 @@ class ModpackImporter:
             icon_path=icon_path
         )
 
+    @staticmethod
+    def _find_modrinth_index(zf: zipfile.ZipFile) -> Optional[str]:
+        """detect_format() also routes overrides/ copies to the modrinth importer."""
+        for name in zf.namelist():
+            if name in ('modrinth.index.json', 'overrides/modrinth.index.json',
+                        'client-overrides/modrinth.index.json'):
+                return name
+        return None
+
     def _read_modrinth_manifest(self, zip_path: str) -> ModpackInfo:
         """Read Modrinth modrinth.index.json"""
         with zipfile.ZipFile(zip_path, 'r') as zf:
-            with zf.open('modrinth.index.json') as f:
+            index_name = self._find_modrinth_index(zf)
+            if index_name is None:
+                raise ValueError("ZIP 中未找到 modrinth.index.json")
+            with zf.open(index_name) as f:
                 manifest = json.load(f)
         
         deps = manifest.get('dependencies', {})
@@ -343,7 +371,7 @@ class ModpackImporter:
                             with lock:
                                 nonlocal downloaded
                                 downloaded += 1
-                            report(0, 0, f"下载模组 {downloaded}/{total}: {filename}", downloaded, total)
+                                report(0, 0, f"下载模组 {downloaded}/{total}: {filename}", downloaded, total)
                             return (True, filename, None)
                         except Exception as e:
                             logger.warning(f"下载模组失败 {project_id}/{file_id} (尝试 {attempt+1}/3): {e}")
@@ -355,14 +383,14 @@ class ModpackImporter:
                     logger.warning(f"下载模组失败 {project_id}/{file_id}: {e}")
                     return (False, f"{project_id}/{file_id}", str(e))
             
-            with ThreadPoolExecutor(max_workers=8) as executor:
+            with ThreadPoolExecutor(max_workers=16) as executor:
                 futures = [
                     executor.submit(download_one, (i, fref))
                     for i, fref in enumerate(required_files)
                 ]
                 for future in as_completed(futures):
                     try:
-                        success, filename, error = future.result(timeout=120)
+                        success, filename, error = future.result(timeout=180)
                         if not success and error:
                             errors.append(error)
                     except TimeoutError:
@@ -371,7 +399,8 @@ class ModpackImporter:
                     except Exception as e:
                         errors.append(f"Thread error: {e}")
             
-            report(85, 100, "提取 overrides...")
+            report(0, 0, f"已下载 {downloaded}/{total} 个模组", downloaded, total)
+            report(85, 100, "提取 overrides...", downloaded, total)
             
             # Extract overrides
             for item in zf.infolist():
@@ -397,7 +426,7 @@ class ModpackImporter:
                 except Exception as e:
                     logger.warning(f"复制图标失败: {e}")
             
-            report(90, 100, "创建版本配置...")
+            report(90, 100, "创建版本配置...", downloaded, total)
             
             # Download vanilla Minecraft version if not installed
             self._ensure_vanilla_version(mc_version, report)
@@ -407,7 +436,7 @@ class ModpackImporter:
                 version_dir, version_name, mc_version, loader, loader_version
             )
             
-            report(100, 100, f"导入完成! 已下载 {downloaded}/{len(files)} 个模组")
+            report(100, 100, f"导入完成! 已下载 {downloaded}/{len(files)} 个模组", downloaded, len(files))
             
             result = {
                 'success': True,
@@ -427,7 +456,10 @@ class ModpackImporter:
         report(0, 100, "读取整合包清单...")
         
         with zipfile.ZipFile(zip_path, 'r') as zf:
-            with zf.open('modrinth.index.json') as f:
+            index_name = self._find_modrinth_index(zf)
+            if index_name is None:
+                raise ValueError("ZIP 中未找到 modrinth.index.json")
+            with zf.open(index_name) as f:
                 manifest = json.load(f)
             
             deps = manifest.get('dependencies', {})
@@ -517,15 +549,15 @@ class ModpackImporter:
                     report(0, 0, f"下载模组 {downloaded}/{total}", downloaded, total, list(file_states))
                 return (False, filename, f"Failed to download {path}")
             
-            # Use 8 parallel threads
-            with ThreadPoolExecutor(max_workers=8) as executor:
+            # Use 16 parallel threads
+            with ThreadPoolExecutor(max_workers=16) as executor:
                 futures = [
                     executor.submit(download_one, (i, fe))
                     for i, fe in enumerate(files)
                 ]
                 for future in as_completed(futures):
                     try:
-                        success, filename, error = future.result(timeout=120)
+                        success, filename, error = future.result(timeout=180)
                         if not success and error:
                             errors.append(error)
                     except TimeoutError:
@@ -534,7 +566,8 @@ class ModpackImporter:
                     except Exception as e:
                         errors.append(f"Thread error: {e}")
             
-            report(85, 100, "提取文件...")
+            report(0, 0, f"已下载 {downloaded}/{total} 个模组", downloaded, total, list(file_states))
+            report(85, 100, "提取文件...", downloaded, total, list(file_states))
             
             # Extract overrides (supports both "overrides/" and "client-overrides/")
             for item in zf.infolist():
@@ -550,14 +583,14 @@ class ModpackImporter:
                         with zf.open(item) as src, open(target, 'wb') as dst:
                             dst.write(src.read())
             
-            report(90, 100, "创建版本配置...")
+            report(90, 100, "创建版本配置...", downloaded, total, list(file_states))
             
             # Create version JSON
             self._create_version_json(
                 version_dir, version_name, mc_version, loader, loader_version
             )
             
-            report(100, 100, f"导入完成! 已下载 {downloaded}/{len(files)} 个模组")
+            report(100, 100, f"导入完成! 已下载 {downloaded}/{len(files)} 个模组", downloaded, len(files), list(file_states))
             
             return {
                 'success': True,
@@ -644,31 +677,59 @@ class ModpackImporter:
             if modrinth_index and (not mods_dir.exists() or not any(mods_dir.iterdir())):
                 files = modrinth_index.get('files', [])
                 if files:
-                    report(90, 100, f"下载模组 (0/{len(files)})...")
+                    total_files = len(files)
+                    file_states = []
+                    lock = Lock()
+                    report(0, 0, f"下载模组 (0/{total_files})", 0, total_files, [])
                     mods_dir.mkdir(exist_ok=True)
                     
                     def download_mod(idx_file):
+                        nonlocal downloaded_count
                         idx, file_entry = idx_file
                         downloads = file_entry.get('downloads', [])
                         path = file_entry.get('path', '')
                         filename = Path(path).name if path else f"file_{idx}"
                         mod_path = mods_dir / filename
+                        
+                        with lock:
+                            file_states.append({"name": filename, "status": "downloading"})
+                            report(0, 0, f"下载模组 ({downloaded_count}/{total_files})", downloaded_count, total_files, list(file_states))
+                        
                         for url in downloads:
-                            try:
-                                self._download_file(url, mod_path)
-                                return True
-                            except Exception as e:
-                                logger.warning(f"下载模组失败 {url}: {e}")
+                            for attempt in range(3):
+                                try:
+                                    self._download_file(url, mod_path)
+                                    with lock:
+                                        downloaded_count += 1
+                                        for fs in file_states:
+                                            if fs["name"] == filename and fs["status"] == "downloading":
+                                                fs["status"] = "done"
+                                                break
+                                        report(0, 0, f"下载模组 ({downloaded_count}/{total_files})", downloaded_count, total_files, list(file_states))
+                                    return True
+                                except Exception as e:
+                                    logger.warning(f"下载模组失败 {url} (尝试 {attempt+1}/3): {e}")
+                                    if attempt < 2:
+                                        import time
+                                        time.sleep(2 * (attempt + 1))
+                        
+                        with lock:
+                            for fs in file_states:
+                                if fs["name"] == filename and fs["status"] == "downloading":
+                                    fs["status"] = "error"
+                                    break
+                            report(0, 0, f"下载模组 ({downloaded_count}/{total_files})", downloaded_count, total_files, list(file_states))
                         return False
                     
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
-                    with ThreadPoolExecutor(max_workers=8) as executor:
+                    with ThreadPoolExecutor(max_workers=16) as executor:
                         futures = [executor.submit(download_mod, (i, fe)) for i, fe in enumerate(files)]
                         for f in as_completed(futures):
-                            if f.result():
-                                downloaded_count += 1
-                            report(90 + int(downloaded_count / len(files) * 9), 100,
-                                   f"下载模组 ({downloaded_count}/{len(files)})...")
+                            try:
+                                f.result(timeout=180)
+                            except Exception as e:
+                                logger.warning(f"下载模组线程错误: {e}")
+                    
+                    report(0, 0, f"已下载 {downloaded_count}/{total_files} 个模组", downloaded_count, total_files, list(file_states))
             
             # Download vanilla Minecraft version if not installed
             self._ensure_vanilla_version(mc_version, report)
@@ -683,13 +744,14 @@ class ModpackImporter:
             return {
                 'success': True,
                 'version_name': version_name,
-                'downloaded': 0,
-                'total': 0,
+                'downloaded': downloaded_count,
+                'total': downloaded_count,
                 'errors': []
             }
 
     def _download_missing_libraries(self, libraries: list):
-        """Download any libraries that are not yet on disk"""
+        """Download any libraries that are not yet on disk (parallel)"""
+        jobs = []
         for lib in libraries:
             name = lib.get("name", "")
             if not name:
@@ -722,12 +784,25 @@ class ModpackImporter:
                     download_url += "/"
                 download_url += f"{group_path}/{artifact}/{version}/{jar_name}"
             
+            jobs.append((name, download_url, lib_path))
+        
+        if not jobs:
+            return
+        
+        def fetch(job):
+            name, url, path = job
             try:
                 logger.info(f"下载库文件: {name}")
-                lib_path.parent.mkdir(parents=True, exist_ok=True)
-                self._download_file(download_url, lib_path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                self._download_file(url, path)
+                return None
             except Exception as e:
-                logger.warning(f"下载库文件失败 {name}: {e}")
+                return f"{name}: {e}"
+        
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            for err in executor.map(fetch, jobs):
+                if err:
+                    logger.warning(f"下载库文件失败 {err}")
 
     def _get_curseforge_file(self, project_id: int, file_id: int) -> Optional[dict]:
         """Get CurseForge file info"""
@@ -742,13 +817,13 @@ class ModpackImporter:
             logger.warning(f"获取 CurseForge 文件信息失败 {project_id}/{file_id}: {e}")
             return None
 
-    def _download_file(self, url: str, dest: Path, total_timeout: int = 120):
+    def _download_file(self, url: str, dest: Path, total_timeout: int = 180):
         """Download a file with content validation and total timeout"""
         import time
         start_time = time.time()
         
         try:
-            resp = requests.get(url, stream=True, timeout=(10, 30))
+            resp = self.download_session.get(url, stream=True, timeout=(10, 30))
             resp.raise_for_status()
             
             # Validate content type for JAR files
@@ -757,10 +832,11 @@ class ModpackImporter:
                 raise ValueError(f"Downloaded HTML instead of JAR from {url}")
             
             with open(dest, 'wb') as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    if time.time() - start_time > total_timeout:
-                        raise TimeoutError(f"Download timed out after {total_timeout}s: {url}")
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+                        if time.time() - start_time > total_timeout:
+                            raise TimeoutError(f"Download timed out after {total_timeout}s: {url}")
         except Exception:
             dest.unlink(missing_ok=True)
             raise
@@ -784,13 +860,24 @@ class ModpackImporter:
             logger.info(f"下载原版 Minecraft {mc_version}...")
             report(91, 100, f"正在下载 Minecraft {mc_version}...")
             
+            # setStatus fires once per file (hundreds of assets) — only report phase changes
+            last_phase = {"msg": ""}
+            
             def status_callback(status):
-                if isinstance(status, dict):
-                    msg = status.get("status", "")
-                    if msg == "Downloading":
-                        report(92, 100, f"正在下载 Minecraft {mc_version}...")
-                    elif msg == "Extracting":
-                        report(95, 100, "正在解压 Minecraft...")
+                # minecraft_launcher_lib passes a plain string to setStatus
+                msg = status if isinstance(status, str) else str(status)
+                lower = msg.lower()
+                if "download" in lower:
+                    phase = f"正在下载 Minecraft {mc_version}..."
+                elif "extract" in lower:
+                    phase = "正在解压 Minecraft..."
+                elif "complete" in lower or "install" in lower:
+                    phase = "正在安装 Minecraft..."
+                else:
+                    return
+                if phase != last_phase["msg"]:
+                    last_phase["msg"] = phase
+                    report(92, 100, phase)
             
             minecraft_launcher_lib.install.install_minecraft_version(
                 mc_version,
@@ -953,10 +1040,12 @@ class ModpackImporter:
             return {'success': True, 'downloaded': 0, 'total': len(files),
                     'message': '所有模组已存在'}
         
-        report(0, 100, f"下载模组 (0/{len(to_download)})...")
+        report(0, 0, f"下载模组 (0/{len(to_download)})", 0, len(to_download), [])
         
         downloaded = 0
         errors = []
+        file_states = []
+        total_to_download = len(to_download)
         
         def download_one(idx_file):
             nonlocal downloaded
@@ -965,29 +1054,46 @@ class ModpackImporter:
             path = file_entry.get('path', '')
             filename = Path(path).name if path else f"file_{idx}"
             mod_path = mods_dir / filename
+            
+            with lock:
+                file_states.append({"name": filename, "status": "downloading"})
+                report(0, 0, f"下载模组 ({downloaded}/{total_to_download})", downloaded, total_to_download, list(file_states))
+            
             for url in downloads:
                 for attempt in range(3):
                     try:
                         self._download_file(url, mod_path)
                         with lock:
                             downloaded += 1
+                            for fs in file_states:
+                                if fs["name"] == filename and fs["status"] == "downloading":
+                                    fs["status"] = "done"
+                                    break
+                            report(0, 0, f"下载模组 ({downloaded}/{total_to_download})", downloaded, total_to_download, list(file_states))
                         return True
                     except Exception as e:
                         logger.warning(f"下载模组失败 {url} (尝试 {attempt+1}/3): {e}")
                         if attempt < 2:
                             import time
                             time.sleep(2 * (attempt + 1))
+            
+            with lock:
+                for fs in file_states:
+                    if fs["name"] == filename and fs["status"] == "downloading":
+                        fs["status"] = "error"
+                        break
+                report(0, 0, f"下载模组 ({downloaded}/{total_to_download})", downloaded, total_to_download, list(file_states))
             return False
         
         from concurrent.futures import ThreadPoolExecutor, as_completed
         from threading import Lock
         lock = Lock()
         
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=16) as executor:
             futures = [executor.submit(download_one, item) for item in to_download]
             for f in as_completed(futures):
                 try:
-                    success = f.result(timeout=120)
+                    success = f.result(timeout=180)
                 except TimeoutError:
                     success = False
                     f.cancel()
@@ -995,8 +1101,8 @@ class ModpackImporter:
                 if not success:
                     idx = futures.index(f)
                     errors.append(f"模组 {to_download[idx][1].get('path', 'unknown')} 下载失败")
-                report(int(downloaded / len(to_download) * 100), 100,
-                       f"下载模组 ({downloaded}/{len(to_download)})...")
+        
+        report(0, 0, f"已下载 {downloaded}/{total_to_download} 个模组", downloaded, total_to_download, list(file_states))
         
         return {
             'success': len(errors) == 0,
