@@ -62,6 +62,38 @@ REDIRECT_URL = "http://localhost:8080"
 logger.info(f"启动器启动 | Azure Client ID: {CLIENT_ID[:8]}...")
 
 
+class ModLoadScheduler:
+    """Coalesce rapid mod-list reload requests: one scan at a time, the
+    newest pending version chained after the current run finishes."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._running = False
+        self._pending = None
+
+    def submit(self, version_id):
+        """Register a load request. True = caller should start the worker."""
+        with self._lock:
+            self._pending = version_id
+            if self._running:
+                return False
+            self._running = True
+            return True
+
+    def complete(self, version_id):
+        """Finished loading version_id; return next version or None (idle)."""
+        with self._lock:
+            pending = self._pending
+            if pending is None:
+                self._running = False
+                return None
+            self._pending = None
+            if pending != version_id:
+                return pending
+            self._running = False
+            return None
+
+
 class LauncherBridge(QObject):
     """Bridge between Python and JavaScript"""
     
@@ -102,6 +134,7 @@ class LauncherBridge(QObject):
         self._game_monitor_timer = QTimer()
         self._game_monitor_timer.timeout.connect(self._check_game_process)
         self._current_mod_version = ""
+        self._mod_sched = ModLoadScheduler()
         # Thread-safe queue for auth callback from HTTP server
         self._auth_callback_queue = queue.Queue()
         self._auth_callback_timer = QTimer()
@@ -1550,14 +1583,43 @@ class LauncherBridge(QObject):
         result = json.dumps(version_list)
         self.versionsLoaded.emit(result)
 
+    @staticmethod
+    def _mod_cache_key(jar: Path):
+        """Cache key strips `.disabled` so enable/disable keeps the hit
+        (a rename would otherwise force jar re-extract + Modrinth icon fetch)."""
+        try:
+            name = jar.name
+            if name.endswith(".disabled"):
+                name = name[:-len(".disabled")]
+            st = jar.stat()
+            return f"{name}|{st.st_size}|{int(st.st_mtime)}"
+        except OSError:
+            return None
+
+    @staticmethod
+    def _cached_mod_entry(jar: Path, cache: dict):
+        """Cache entry for jar, with `enabled` refreshed from current filename
+        (cached dicts store a stale `enabled` from build time)."""
+        key = LauncherBridge._mod_cache_key(jar)
+        if not key:
+            return None
+        entry = cache.get(key)
+        if not isinstance(entry, dict):
+            return None
+        entry = dict(entry)
+        entry["enabled"] = not jar.name.endswith(".disabled")
+        return entry
+
     @pyqtSlot(str)
     def loadMods(self, version_id: str):
-        """Load and send mod list to JS (threaded)"""
+        """Load and send mod list to JS (threaded, coalesced)"""
         logger.info(f"加载模组列表: {version_id}")
         self._current_mod_version = version_id or ""
-        def _do_load():
+        if not self._mod_sched.submit(version_id):
+            return  # a scan is already running; it will chain this request
+        def _do_load(current_id: str):
             try:
-                mods_path = self.versions.get_mods_path(version_id) if version_id else Path(self.settings.get("minecraft_dir")) / "mods"
+                mods_path = self.versions.get_mods_path(current_id) if current_id else Path(self.settings.get("minecraft_dir")) / "mods"
                 mods = []
                 jar_files = []
                 if mods_path.exists():
@@ -1571,8 +1633,8 @@ class LauncherBridge(QObject):
                                     jar_files.append(sub_item)
                 
                 # Also scan .fabric/processedMods for Fabric modpacks
-                if not jar_files and version_id:
-                    fabric_mods = Path(self.settings.get("minecraft_dir")) / "versions" / version_id / ".fabric" / "processedMods"
+                if not jar_files and current_id:
+                    fabric_mods = Path(self.settings.get("minecraft_dir")) / "versions" / current_id / ".fabric" / "processedMods"
                     if fabric_mods.exists():
                         for item in fabric_mods.iterdir():
                             if item.is_file() and item.suffix == ".jar":
@@ -1592,23 +1654,16 @@ class LauncherBridge(QObject):
                 except Exception:
                     cache = {}
 
-                def _cache_key(jar: Path):
-                    try:
-                        st = jar.stat()
-                        return f"{jar.name}|{st.st_size}|{int(st.st_mtime)}"
-                    except OSError:
-                        return None
-
                 def _build(jar: Path):
                     return jar, ModInfo(str(jar)).to_dict()
 
-                keys = [_cache_key(j) for j in jar_files]
+                keys = [self._mod_cache_key(j) for j in jar_files]
                 mods = [None] * len(jar_files)
                 missing = []
                 for i in range(len(jar_files)):
-                    k = keys[i]
-                    if k and isinstance(cache.get(k), dict):
-                        mods[i] = cache[k]
+                    entry = self._cached_mod_entry(jar_files[i], cache)
+                    if entry is not None:
+                        mods[i] = entry
                     else:
                         missing.append(i)
 
@@ -1642,52 +1697,63 @@ class LauncherBridge(QObject):
             except Exception as e:
                 logger.error(f"加载模组列表失败: {e}", exc_info=True)
                 self.errorOccurred.emit(f"加载模组列表失败: {e}")
-        threading.Thread(target=_do_load, daemon=True).start()
+        def _worker():
+            current = version_id
+            while current is not None:
+                _do_load(current)
+                current = self._mod_sched.complete(current)
+        threading.Thread(target=_worker, daemon=True).start()
 
     @pyqtSlot(str)
     def enableMod(self, filename: str):
-        """Enable a mod"""
+        """Enable a mod (threaded: file ops must not block the GUI thread)"""
         logger.info(f"启用模组: {filename}")
-        try:
-            mods_dir = self.versions.get_mods_path(self._current_mod_version) if self._current_mod_version else None
-            success = self.mods.enable_mod(filename, mods_dir=mods_dir)
-            if success:
-                self.loadMods(self._current_mod_version)
-            else:
-                self.errorOccurred.emit("启用模组失败")
-        except Exception as e:
-            logger.error(f"启用模组失败: {e}", exc_info=True)
-            self.errorOccurred.emit(f"启用模组失败: {e}")
+        def _do():
+            try:
+                mods_dir = self.versions.get_mods_path(self._current_mod_version) if self._current_mod_version else None
+                success = self.mods.enable_mod(filename, mods_dir=mods_dir)
+                if success:
+                    self.loadMods(self._current_mod_version)
+                else:
+                    self.errorOccurred.emit("启用模组失败")
+            except Exception as e:
+                logger.error(f"启用模组失败: {e}", exc_info=True)
+                self.errorOccurred.emit(f"启用模组失败: {e}")
+        threading.Thread(target=_do, daemon=True).start()
 
     @pyqtSlot(str)
     def disableMod(self, filename: str):
-        """Disable a mod"""
+        """Disable a mod (threaded: file ops must not block the GUI thread)"""
         logger.info(f"禁用模组: {filename}")
-        try:
-            mods_dir = self.versions.get_mods_path(self._current_mod_version) if self._current_mod_version else None
-            success = self.mods.disable_mod(filename, mods_dir=mods_dir)
-            if success:
-                self.loadMods(self._current_mod_version)
-            else:
-                self.errorOccurred.emit("禁用模组失败")
-        except Exception as e:
-            logger.error(f"禁用模组失败: {e}", exc_info=True)
-            self.errorOccurred.emit(f"禁用模组失败: {e}")
+        def _do():
+            try:
+                mods_dir = self.versions.get_mods_path(self._current_mod_version) if self._current_mod_version else None
+                success = self.mods.disable_mod(filename, mods_dir=mods_dir)
+                if success:
+                    self.loadMods(self._current_mod_version)
+                else:
+                    self.errorOccurred.emit("禁用模组失败")
+            except Exception as e:
+                logger.error(f"禁用模组失败: {e}", exc_info=True)
+                self.errorOccurred.emit(f"禁用模组失败: {e}")
+        threading.Thread(target=_do, daemon=True).start()
 
     @pyqtSlot(str)
     def deleteMod(self, filename: str):
-        """Delete a mod"""
+        """Delete a mod (threaded: file ops must not block the GUI thread)"""
         logger.info(f"删除模组: {filename}")
-        try:
-            mods_dir = self.versions.get_mods_path(self._current_mod_version) if self._current_mod_version else None
-            success = self.mods.delete_mod(filename, mods_dir=mods_dir)
-            if success:
-                self.loadMods(self._current_mod_version)
-            else:
-                self.errorOccurred.emit("删除模组失败")
-        except Exception as e:
-            logger.error(f"删除模组失败: {e}", exc_info=True)
-            self.errorOccurred.emit(f"删除模组失败: {e}")
+        def _do():
+            try:
+                mods_dir = self.versions.get_mods_path(self._current_mod_version) if self._current_mod_version else None
+                success = self.mods.delete_mod(filename, mods_dir=mods_dir)
+                if success:
+                    self.loadMods(self._current_mod_version)
+                else:
+                    self.errorOccurred.emit("删除模组失败")
+            except Exception as e:
+                logger.error(f"删除模组失败: {e}", exc_info=True)
+                self.errorOccurred.emit(f"删除模组失败: {e}")
+        threading.Thread(target=_do, daemon=True).start()
 
     @pyqtSlot(str)
     def loadWorlds(self, version_id: str):
@@ -1716,23 +1782,25 @@ class LauncherBridge(QObject):
 
     @pyqtSlot(str, str)
     def deleteWorld(self, version_id: str, folder: str):
-        """Delete a world"""
+        """Delete a world (threaded: rmtree can be slow)"""
         logger.info(f"删除世界: {folder} (版本: {version_id})")
-        try:
-            if version_id:
-                saves_path = self.versions.get_saves_path(version_id)
-                world_path = saves_path / folder
-                if world_path.exists():
-                    import shutil
-                    shutil.rmtree(world_path)
-                    self.loadWorlds(version_id)
+        def _do():
+            try:
+                if version_id:
+                    saves_path = self.versions.get_saves_path(version_id)
+                    world_path = saves_path / folder
+                    if world_path.exists():
+                        import shutil
+                        shutil.rmtree(world_path)
+                        self.loadWorlds(version_id)
+                    else:
+                        self.errorOccurred.emit("世界不存在")
                 else:
-                    self.errorOccurred.emit("世界不存在")
-            else:
-                self.errorOccurred.emit("请先选择版本")
-        except Exception as e:
-            logger.error(f"删除世界失败: {e}", exc_info=True)
-            self.errorOccurred.emit(f"删除世界失败: {e}")
+                    self.errorOccurred.emit("请先选择版本")
+            except Exception as e:
+                logger.error(f"删除世界失败: {e}", exc_info=True)
+                self.errorOccurred.emit(f"删除世界失败: {e}")
+        threading.Thread(target=_do, daemon=True).start()
 
     @pyqtSlot(str)
     def loadResourcepacks(self, version_id: str):
@@ -1759,22 +1827,24 @@ class LauncherBridge(QObject):
 
     @pyqtSlot(str, str)
     def deleteResourcepack(self, version_id: str, filename: str):
-        """Delete a resourcepack"""
+        """Delete a resourcepack (threaded: file ops must not block the GUI)"""
         logger.info(f"删除资源包: {filename} (版本: {version_id})")
-        try:
-            if version_id:
-                rp_path = self.versions.get_resourcepacks_path(version_id)
-                rp_file = rp_path / filename
-                if rp_file.exists():
-                    rp_file.unlink()
-                    self.loadResourcepacks(version_id)
+        def _do():
+            try:
+                if version_id:
+                    rp_path = self.versions.get_resourcepacks_path(version_id)
+                    rp_file = rp_path / filename
+                    if rp_file.exists():
+                        rp_file.unlink()
+                        self.loadResourcepacks(version_id)
+                    else:
+                        self.errorOccurred.emit("资源包不存在")
                 else:
-                    self.errorOccurred.emit("资源包不存在")
-            else:
-                self.errorOccurred.emit("请先选择版本")
-        except Exception as e:
-            logger.error(f"删除资源包失败: {e}", exc_info=True)
-            self.errorOccurred.emit(f"删除资源包失败: {e}")
+                    self.errorOccurred.emit("请先选择版本")
+            except Exception as e:
+                logger.error(f"删除资源包失败: {e}", exc_info=True)
+                self.errorOccurred.emit(f"删除资源包失败: {e}")
+        threading.Thread(target=_do, daemon=True).start()
 
     @pyqtSlot()
     def checkLoginStatus(self):

@@ -159,3 +159,17 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 **修复**：`N = trackedTotal - (done+error)`，即**剩余未完成数**（queued+未开始+下载中），随完成递减、归 0 后整行隐藏；重试中（status 仍 downloading）不计入 settled，不会假降。
 
 **验证**：重放脚本新增 30 文件合成场景 —— 旧代码 `remSeq=[0,...,1,2,...,15]` 增长（红）→ 新代码 `[30,30,29,...,1,0]` 递减（绿）；4 条真实流 remOK=true；`node --check` + 套件 7/7
+
+### 修复：模组启用/禁用反馈慢、模组页点击卡顿、版本页白屏（2026-09-25 修复）
+
+**根因**：
+1. 启用/禁用把文件改名（`.jar` ↔ `.jar.disabled`），modcache 键含完整文件名 → 键变化 → 缓存全失 → 重新解包 jar 元数据 + 请求 Modrinth 图标（日志：往返 3.7s、`createoreexcavation` 等坏 mod_id 404 后走 search 兜底）
+2. JS 点击后等 Python 全量返回才刷新，3.5MB JSON 触发整表重渲染（肉眼可见"卡一下"）；期间重复点击用旧文件名调用 → 日志连报 `模组不存在: ....jar.disabled`
+3. `enableMod/disableMod/deleteMod/deleteWorld/deleteResourcepack` 在 GUI 线程同步执行文件操作；`loadMods` 快速连发时并发扫描同一目录
+4. 版本模组/版本世界/版本资源包页切换时不显示骨架屏，白屏直到数据返回
+
+**修复**：
+- `main.py`：新增 `ModLoadScheduler`（同一时间只跑一次扫描，最新请求链式补跑，杜绝并发扫描/结果串版本）；`_mod_cache_key` 把 `.disabled` 从键中剥掉——改名不再破坏缓存，启用/禁用命中缓存、零网络；`_cached_mod_entry` 读缓存时按当前文件名刷新 `enabled`（缓存里存的是构建时旧值）；`enableMod`/`disableMod`/`deleteMod`/`deleteWorld`/`deleteResourcepack` 全部改为后台线程执行
+- `ui/index.html`：`toggleMod` 乐观更新——本地立刻翻转 `enabled`/`filename`、就地修补该行（复选框、禁用/启用按钮、`data-filename`），再调 Python；`applyLocalToggle` 纯函数双向改名，连点时发给后端的文件名永远正确；`deleteModConfirm` 乐观移除行；`renderModList` 保留滚动位置 + 30 个一批分帧渲染（大列表不再冻结）+ 渲染代次防旧批次续写；`navigateTo` 对版本模组/世界/资源包页先出骨架屏；按钮 HTML 抽成 `modActionsHtml` 供渲染与就地修补共用
+
+**验证**：红→绿 TDD —— Python 先 2 FAILED（`_mod_cache_key` 改名稳定性、`ModLoadScheduler` 合并/链式）再实现；node `applyLocalToggle` 先 RED（marker not found）后绿；套件 9/9 ALL PASS；`py_compile`；提取 `<script>` `node --check`；进度重放 5 场景无 dip、remOK=true

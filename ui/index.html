@@ -2621,6 +2621,12 @@
             } else if (page === 'resourcepacks') {
                 showLoading('resourcepacksList');
                 loadResourcepacksFromLauncher();
+            } else if (page === 'versionMods') {
+                showLoading('versionModsList');
+            } else if (page === 'versionWorlds') {
+                showLoading('versionWorldsList');
+            } else if (page === 'versionResourcepacks') {
+                showLoading('versionResourcepacksList');
             }
             
             // Show search/filter only on download page
@@ -3085,10 +3091,13 @@
                 return;
             }
             
-            var fragment = document.createDocumentFragment();
+            var prevScroll = list.scrollTop;
+            var items = [];
+            var gen = ++modRenderGen;
             mods.forEach(function(mod) {
                 var item = document.createElement('div');
                 item.className = 'mod-item' + (mod.enabled ? '' : ' mod-disabled');
+                item.setAttribute('data-filename', mod.filename);
                 
                 // Checkbox
                 var checkbox = '<div class="mod-checkbox ' + (mod.enabled ? 'checked' : '') + '" onclick="toggleMod(\'' + mod.filename + '\', ' + !mod.enabled + ')">' +
@@ -3123,11 +3132,6 @@
                     metaLine = '<span class="mod-filename">' + escapeHtml(mod.filename) + '</span>';
                 }
                 
-                // Action buttons
-                var enableBtn = mod.enabled ?
-                    '<button class="mod-btn mod-btn-disable" onclick="toggleMod(\'' + mod.filename + '\', false)">禁用</button>' :
-                    '<button class="mod-btn mod-btn-enable" onclick="toggleMod(\'' + mod.filename + '\', true)">启用</button>';
-                
                 item.innerHTML = checkbox + iconHtml +
                     '<div class="mod-info">' +
                     '<div class="mod-name-row">' +
@@ -3136,26 +3140,86 @@
                     '</div>' +
                     '<div class="mod-meta">' + metaLine + '</div>' +
                     '</div>' +
-                    '<div class="mod-actions">' +
-                    enableBtn +
-                    '<button class="mod-btn mod-btn-delete" onclick="deleteModConfirm(\'' + mod.filename + '\')">删除</button>' +
-                    '</div>';
-                
-                fragment.appendChild(item);
+                    '<div class="mod-actions">' + modActionsHtml(mod.filename, mod.enabled) + '</div>';
+
+                items.push(item);
             });
             list.innerHTML = '';
-            list.appendChild(fragment);
+            // Batched append so a 300-mod pack does not freeze the UI;
+            // previous scroll restored after the final batch.
+            var idx = 0;
+            function appendBatch() {
+                if (gen !== modRenderGen) return;  // superseded by a newer render
+                var end = Math.min(idx + 30, items.length);
+                for (; idx < end; idx++) list.appendChild(items[idx]);
+                if (idx < items.length) {
+                    requestAnimationFrame(appendBatch);
+                } else {
+                    list.scrollTop = prevScroll;
+                }
+            }
+            appendBatch();
         }
 
+        var lastMods = [];
+        var modRenderGen = 0;
+
         function updateModList(mods) {
+            lastMods = mods || [];
             if (currentPage === 'versionMods') {
-                renderModList(mods, 'versionModsList');
+                renderModList(lastMods, 'versionModsList');
             } else {
-                renderModList(mods, 'modsList');
+                renderModList(lastMods, 'modsList');
             }
         }
 
+        function modActionsHtml(filename, enabled) {
+            var toggleBtn = enabled ?
+                '<button class="mod-btn mod-btn-disable" onclick="toggleMod(\'' + filename + '\', false)">禁用</button>' :
+                '<button class="mod-btn mod-btn-enable" onclick="toggleMod(\'' + filename + '\', true)">启用</button>';
+            return toggleBtn +
+                '<button class="mod-btn mod-btn-delete" onclick="deleteModConfirm(\'' + filename + '\')">删除</button>';
+        }
+
+        // Optimistic local flip: mirrors the rename Python will do, so rapid
+        // clicks send correct filenames and the row updates before the reply.
+        function applyLocalToggle(mods, filename, enable) {
+            for (var i = 0; i < mods.length; i++) {
+                if (mods[i].filename === filename) {
+                    mods[i].enabled = enable;
+                    mods[i].filename = enable ? filename.replace(/\.disabled$/, '') : filename + '.disabled';
+                    return mods[i];
+                }
+            }
+            return null;
+        }
+
+        function findModRow(filename) {
+            var listId = currentPage === 'versionMods' ? 'versionModsList' : 'modsList';
+            var list = document.getElementById(listId);
+            if (!list) return null;
+            var rows = list.querySelectorAll('.mod-item');
+            for (var i = 0; i < rows.length; i++) {
+                if (rows[i].getAttribute('data-filename') === filename) return rows[i];
+            }
+            return null;
+        }
+
         function toggleMod(filename, enable) {
+            var updated = applyLocalToggle(lastMods, filename, enable);
+            var newFilename = updated ? updated.filename : filename;
+            var row = findModRow(filename);
+            if (row) {
+                row.className = 'mod-item' + (enable ? '' : ' mod-disabled');
+                row.setAttribute('data-filename', newFilename);
+                var cb = row.querySelector('.mod-checkbox');
+                if (cb) {
+                    cb.className = 'mod-checkbox' + (enable ? ' checked' : '');
+                    cb.setAttribute('onclick', "toggleMod('" + newFilename + "', " + (!enable) + ")");
+                }
+                var actions = row.querySelector('.mod-actions');
+                if (actions) actions.innerHTML = modActionsHtml(newFilename, enable);
+            }
             if (enable && pythonInterface && pythonInterface.enableMod) {
                 pythonInterface.enableMod(filename);
             } else if (!enable && pythonInterface && pythonInterface.disableMod) {
@@ -3165,6 +3229,11 @@
 
         function deleteModConfirm(filename) {
             if (confirm('确定要删除模组 ' + filename + ' 吗？')) {
+                for (var i = 0; i < lastMods.length; i++) {
+                    if (lastMods[i].filename === filename) { lastMods.splice(i, 1); break; }
+                }
+                var row = findModRow(filename);
+                if (row && row.parentElement) row.parentElement.removeChild(row);
                 if (pythonInterface && pythonInterface.deleteMod) {
                     pythonInterface.deleteMod(filename);
                 }
