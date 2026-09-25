@@ -148,20 +148,6 @@ class LauncherBridge(QObject):
         self._current_mod_version = version_id or ""
         logger.info(f"设置当前版本上下文: {version_id}")
 
-    @pyqtSlot()
-    def collapseWindow(self):
-        """Collapse main window to the slim strip (JS calls this)."""
-        win = getattr(self, "main_window", None)
-        if win is not None:
-            win.collapse_to_strip()
-
-    @pyqtSlot()
-    def expandWindow(self):
-        """Restore window from the slim strip (JS calls this)."""
-        win = getattr(self, "main_window", None)
-        if win is not None:
-            win.restore_from_strip()
-
     def _path_to_data_uri(self, path: str) -> str:
         """Convert an image file path to a base64 data URI"""
         import base64
@@ -1885,7 +1871,6 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(QIcon(os.path.join(os.path.dirname(__file__), "ui", "icon.svg")))
         self.setMinimumSize(1200, 700)
         self.resize(1400, 800)
-        self._strip_geometry = None  # saved geometry while collapsed to strip
         logger.info("MainWindow 初始化")
         
         # Initialize core components
@@ -1948,23 +1933,6 @@ class MainWindow(QMainWindow):
         
         # Login status will be checked after JS bridge is ready (via HTML callback)
         logger.info("MainWindow 初始化完成")
-
-    def collapse_to_strip(self):
-        """Shrink the window to the slim strip (当前选择 + 启动游戏)."""
-        if self._strip_geometry is None:
-            self._strip_geometry = self.geometry()
-            self.setMinimumSize(440, 78)
-            self.resize(440, 78)
-            logger.info("窗口已收起到细条")
-
-    def restore_from_strip(self):
-        """Restore the window geometry saved by collapse_to_strip()."""
-        if self._strip_geometry is None:
-            return
-        geometry, self._strip_geometry = self._strip_geometry, None
-        self.setMinimumSize(1200, 700)
-        self.setGeometry(geometry)
-        logger.info("窗口已展开")
 
     def _on_versions_loaded(self, versions_json: str):
         logger.info(f"信号: versionsLoaded (长度: {len(versions_json)})")

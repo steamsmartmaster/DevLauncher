@@ -174,7 +174,7 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 
 **验证**：红→绿 TDD —— Python 先 2 FAILED（`_mod_cache_key` 改名稳定性、`ModLoadScheduler` 合并/链式）再实现；node `applyLocalToggle` 先 RED（marker not found）后绿；套件 9/9 ALL PASS；`py_compile`；提取 `<script>` `node --check`；进度重放 5 场景无 dip、remOK=true
 
-### 新增：收起按钮（窗口 → 细条）（2026-09-25 新增）
+### 新增：收起按钮（窗口 → 细条）（2026-09-25 新增）**【已废弃：2026-09-25 当日被"弹窗原位缩小"方案替代，细条代码已全部移除，见文末】**
 
 **需求**：版本页工具栏"导入整合包"左侧、导入弹窗底栏"导入中..."左侧各放一个"收起"按钮；点击把主窗口收成细条（当前选择 + 启动游戏），后台任务（导入/下载）继续。
 
@@ -192,3 +192,15 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - **结果：9/9 ALL PASS**（一次性通过——用例基于完整源码侦察重建，非新特性 TDD）
 - `test_toggle_local.js`（applyLocalToggle）凭本会话内容原样重建并 PASS
 - 未重建：`replay_progress.js` / `dump_reports.py` / `replay_reports.json`（依赖真实整合包归档生成的报告流；JS 进度单调性断言已部分由套件的 retry/states 断言覆盖，需要时可再重建）
+
+### 收起重定义：弹窗原位缩小 + 转圈修复（2026-09-25，替代"窗口细条"）
+
+**需求**（用户澄清）：收起 = 把导入整合包弹窗变成内置下载器那样的小面板（"下载模组 N/M" + 转圈文件列表），**原位缩小**；顶栏"收起"与窗口细条方案移除。另修：下载模组的转圈圆圈每次进度更新角度重置。
+
+**实现**：
+- **移除细条**：`index.html` 删 `.window-strip`/`body.app-collapsed` CSS、顶栏收起按钮、`#windowStrip`、`selectVersion`/`updateLaunchButton` 挂接、`collapseAppWindow`/`expandAppWindow`/`syncStripLaunch`；`main.py` 删 `collapseWindow`/`expandWindow` 槽与 `collapse_to_strip`/`restore_from_strip`/`_strip_geometry`
+- **弹窗原位缩小**：`modal-content` 内包 `importFullView`（原 header/body/footer），新增 `importMiniView`——`download-progress-header`（"下载模组" + `N/M · pct%`）+ 细进度条 + `download-file-list` 转圈列表 + 底部阶段消息/展开按钮；`collapseImportModal` 受 `modpackImporting` 门控（未开始导入点收起 → toast"导入开始后才能收起"），加 `.import-collapsed` 收窄至 420px；`onModpackImportComplete`/`closeModpackImportModal` 自动 `expandImportModal` 复位
+- **进度双写**：`updateModpackImportProgress` 尾部同步 mini 的 count/fill/msg/list（保滚动、上限 15 条），完整视图逻辑不动
+- **转圈修复**：新增共享 `dlFileItemHtml(f)`——downloading 图标内联 `animation-delay:-(Date.now()%800/1000)s` 把旋转相位锚定墙钟，innerHTML 整体重建不再重启动画；内置下载面板（`updateLaunchButton` installing 分支）与 mini 列表共用，done ✓/error ✗ 行为不变
+
+**验证**：红→绿 TDD —— `test_collapse_spin.js` 先 RED（`dlFileItemHtml` not found）；绿：delay ∈ [0,0.8)、收起门控/幂等切换、mini 进度 43→86→100% 无回退、mini 列表无"还有"行；`test_toggle_local.js` PASS；套件 9/9 ALL PASS；`py_compile`；提取 `<script>` `node --check`；grep 确认细条引用 0 残留
