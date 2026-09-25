@@ -1,4 +1,4 @@
-﻿# DevLauncher
+# DevLauncher
 
 一个用 Python 构建的 Minecraft 启动器，面向模组开发者和整合包制作者。
 
