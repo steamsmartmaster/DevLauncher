@@ -141,3 +141,14 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 **验证：**
 - 离线套件 6/6：新增断言（终态 states 全部带 size、无 queued 残留、非 CF 流程首份 states 即预注册全量）
 - `node --check`（提取全部 `<script>`）+ `py_compile` 通过
+
+### 修复：下载重试时进度回落（"下载到某个进度会重置"）
+**根因**：`_tracked_progress_cb` 每次用当前 attempt 的 `done/size` **直接覆盖** `fs.progress`——重试第 2 次从 0 字节重新计数，文件进度瞬间从 90% 跳回个位数。模态文件列表的文件条、侧栏文件行的 `%`、侧栏整体条 `(fd+frac)/ft`（无单调保护）都读这个值，于是肉眼可见"进度重置"。
+
+**定位方法**：离线重放 4 条真实报告流（55 个报告）驱动 JS 进度函数 → 模态总条/副标题计数/侧栏公式**全部单调无 dip**（总条有 clamp），唯一能产生回落的路径就是重试覆盖 → 构造 flaky 下载复现，红→绿 TDD。
+
+**修复：**
+- `modpack_importer.py` — `fs["progress"] = max(旧值, 新值)`：重试期间显示停在已到达位置，追上后继续前进（模态总条 clamp、字节加权免疫不变）
+- `ui/index.html` — 侧栏整体条把 `error` 文件按"已结算"计 1（与模态字节语义一致；不计入 fd 的 error 不再让条回退，最后一个文件失败时侧栏也能走满）
+
+**验证**：套件 7/7（新增 `retry-progress-monotonic`：attempt-1 90% 失败 → attempt-2 从 0 重下，断言该文件 downloading 状态序列不降）；`node --check`；重放无 dip

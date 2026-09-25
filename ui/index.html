@@ -4827,7 +4827,9 @@
                             var frac = 0;
                             if (detail.files) {
                                 for (var fi = 0; fi < detail.files.length; fi++) {
-                                    if (detail.files[fi].status === 'downloading') frac += (detail.files[fi].progress || 0) / 100;
+                                    var stf = detail.files[fi];
+                                    if (stf.status === 'downloading') frac += (stf.progress || 0) / 100;
+                                    else if (stf.status === 'error') frac += 1; // settled: never dips the bar
                                 }
                             }
                             var pct = Math.min(100, Math.round((detail.file_downloaded + frac) * 100 / detail.file_total));

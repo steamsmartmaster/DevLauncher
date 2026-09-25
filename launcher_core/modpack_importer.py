@@ -962,7 +962,9 @@ class ModpackImporter:
                     if fs["name"] == filename and fs["status"] == "downloading":
                         if size > 0 and not fs.get("size"):
                             fs["size"] = int(size)
-                        fs["progress"] = pct
+                        # A retry restarts the byte counter; never move the
+                        # displayed progress backwards.
+                        fs["progress"] = max(int(fs.get("progress") or 0), pct)
                         break
                 downloaded, total = counts()
                 report(0, 0, f"下载模组: {filename}", downloaded, total, list(file_states))
