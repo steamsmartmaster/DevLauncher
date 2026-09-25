@@ -2,6 +2,7 @@
 import json
 import logging
 import shutil
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -347,8 +348,11 @@ class ModpackImporter:
             downloaded = 0
             errors = []
             lock = Lock()
+            file_states = []
+            throttle = {"t": 0.0}
             
             def download_one(idx_fref):
+                nonlocal downloaded
                 idx, file_ref = idx_fref
                 project_id = file_ref.get('projectID')
                 file_id = file_ref.get('fileID')
@@ -365,19 +369,34 @@ class ModpackImporter:
                         return (False, filename, "No download URL")
                     
                     mod_path = mods_dir / filename
+                    with lock:
+                        file_states.append({"name": filename, "status": "downloading", "progress": 0})
+                        report(0, 0, f"下载模组: {filename}", downloaded, total, list(file_states))
+                    progress_cb = self._tracked_progress_cb(
+                        filename, file_states, lock, report,
+                        lambda: (downloaded, total), throttle
+                    )
                     for attempt in range(3):
                         try:
-                            self._download_file(download_url, mod_path)
+                            self._download_file(download_url, mod_path, progress_cb=progress_cb)
                             with lock:
-                                nonlocal downloaded
                                 downloaded += 1
-                                report(0, 0, f"下载模组 {downloaded}/{total}: {filename}", downloaded, total)
+                                for fs in file_states:
+                                    if fs["name"] == filename and fs["status"] == "downloading":
+                                        fs["status"] = "done"
+                                        break
+                                report(0, 0, f"下载模组 {downloaded}/{total}: {filename}", downloaded, total, list(file_states))
                             return (True, filename, None)
                         except Exception as e:
                             logger.warning(f"下载模组失败 {project_id}/{file_id} (尝试 {attempt+1}/3): {e}")
                             if attempt < 2:
-                                import time
                                 time.sleep(2 * (attempt + 1))
+                    with lock:
+                        for fs in file_states:
+                            if fs["name"] == filename and fs["status"] == "downloading":
+                                fs["status"] = "error"
+                                break
+                        report(0, 0, f"下载模组 {downloaded}/{total}: {filename}", downloaded, total, list(file_states))
                     return (False, filename, f"Failed after 3 attempts")
                 except Exception as e:
                     logger.warning(f"下载模组失败 {project_id}/{file_id}: {e}")
@@ -399,8 +418,8 @@ class ModpackImporter:
                     except Exception as e:
                         errors.append(f"Thread error: {e}")
             
-            report(0, 0, f"已下载 {downloaded}/{total} 个模组", downloaded, total)
-            report(85, 100, "提取 overrides...", downloaded, total)
+            report(0, 0, f"已下载 {downloaded}/{total} 个模组", downloaded, total, list(file_states))
+            report(85, 100, "提取 overrides...", downloaded, total, list(file_states))
             
             # Extract overrides
             for item in zf.infolist():
@@ -426,7 +445,7 @@ class ModpackImporter:
                 except Exception as e:
                     logger.warning(f"复制图标失败: {e}")
             
-            report(90, 100, "创建版本配置...", downloaded, total)
+            report(90, 100, "创建版本配置...", downloaded, total, list(file_states))
             
             # Download vanilla Minecraft version if not installed
             self._ensure_vanilla_version(mc_version, report)
@@ -436,7 +455,12 @@ class ModpackImporter:
                 version_dir, version_name, mc_version, loader, loader_version
             )
             
-            report(100, 100, f"导入完成! 已下载 {downloaded}/{len(files)} 个模组", downloaded, len(files))
+            # Install Forge/NeoForge into this version (HMCL-style merge)
+            loader_warning = self._install_loader_for_import(
+                version_name, loader, loader_version, report
+            )
+            
+            report(100, 100, f"导入完成! 已下载 {downloaded}/{len(files)} 个模组", downloaded, len(files), list(file_states))
             
             result = {
                 'success': True,
@@ -448,6 +472,10 @@ class ModpackImporter:
             
             if errors:
                 result['warning'] = f'{len(errors)} 个模组下载失败'
+            if loader_warning:
+                result['warning'] = (
+                    result['warning'] + '; ' if 'warning' in result else ''
+                ) + loader_warning
             
             return result
 
@@ -497,6 +525,7 @@ class ModpackImporter:
             errors = []
             lock = Lock()
             file_states = []  # Track all file states
+            throttle = {"t": 0.0}
             
             def download_one(idx_file):
                 nonlocal downloaded
@@ -508,7 +537,7 @@ class ModpackImporter:
                 
                 # Mark as downloading
                 with lock:
-                    file_states.append({"name": filename, "status": "downloading"})
+                    file_states.append({"name": filename, "status": "downloading", "progress": 0})
                     report(0, 0, f"下载模组 {downloaded}/{total}", downloaded, total, list(file_states))
                 
                 if not downloads:
@@ -522,10 +551,14 @@ class ModpackImporter:
                         report(0, 0, f"下载模组 {downloaded}/{total}", downloaded, total, list(file_states))
                     return (False, filename, f"No download URL for {path}")
                 
+                progress_cb = self._tracked_progress_cb(
+                    filename, file_states, lock, report,
+                    lambda: (downloaded, total), throttle
+                )
                 for url in downloads:
                     for attempt in range(3):
                         try:
-                            self._download_file(url, mod_path)
+                            self._download_file(url, mod_path, progress_cb=progress_cb)
                             with lock:
                                 downloaded += 1
                                 # Update file status
@@ -538,7 +571,6 @@ class ModpackImporter:
                         except Exception as e:
                             logger.warning(f"下载失败 {url} (尝试 {attempt+1}/3): {e}")
                             if attempt < 2:
-                                import time
                                 time.sleep(2 * (attempt + 1))
                 
                 with lock:
@@ -585,20 +617,31 @@ class ModpackImporter:
             
             report(90, 100, "创建版本配置...", downloaded, total, list(file_states))
             
+            # Download vanilla Minecraft version if not installed
+            self._ensure_vanilla_version(mc_version, report)
+            
             # Create version JSON
             self._create_version_json(
                 version_dir, version_name, mc_version, loader, loader_version
             )
             
+            # Install Forge/NeoForge into this version (HMCL-style merge)
+            loader_warning = self._install_loader_for_import(
+                version_name, loader, loader_version, report
+            )
+            
             report(100, 100, f"导入完成! 已下载 {downloaded}/{len(files)} 个模组", downloaded, len(files), list(file_states))
             
-            return {
+            result = {
                 'success': True,
                 'version_name': version_name,
                 'downloaded': downloaded,
                 'total': len(files),
                 'errors': errors
             }
+            if loader_warning:
+                result['warning'] = loader_warning
+            return result
 
     def _import_multimc(self, zip_path: str, version_name: str, report) -> dict:
         """Import MultiMC modpack"""
@@ -679,6 +722,7 @@ class ModpackImporter:
                 if files:
                     total_files = len(files)
                     file_states = []
+                    throttle = {"t": 0.0}
                     lock = Lock()
                     report(0, 0, f"下载模组 (0/{total_files})", 0, total_files, [])
                     mods_dir.mkdir(exist_ok=True)
@@ -692,13 +736,17 @@ class ModpackImporter:
                         mod_path = mods_dir / filename
                         
                         with lock:
-                            file_states.append({"name": filename, "status": "downloading"})
+                            file_states.append({"name": filename, "status": "downloading", "progress": 0})
                             report(0, 0, f"下载模组 ({downloaded_count}/{total_files})", downloaded_count, total_files, list(file_states))
                         
+                        progress_cb = self._tracked_progress_cb(
+                            filename, file_states, lock, report,
+                            lambda: (downloaded_count, total_files), throttle
+                        )
                         for url in downloads:
                             for attempt in range(3):
                                 try:
-                                    self._download_file(url, mod_path)
+                                    self._download_file(url, mod_path, progress_cb=progress_cb)
                                     with lock:
                                         downloaded_count += 1
                                         for fs in file_states:
@@ -710,7 +758,6 @@ class ModpackImporter:
                                 except Exception as e:
                                     logger.warning(f"下载模组失败 {url} (尝试 {attempt+1}/3): {e}")
                                     if attempt < 2:
-                                        import time
                                         time.sleep(2 * (attempt + 1))
                         
                         with lock:
@@ -739,15 +786,23 @@ class ModpackImporter:
                 version_dir, version_name, mc_version, loader, loader_version
             )
             
+            # Install Forge/NeoForge into this version (HMCL-style merge)
+            loader_warning = self._install_loader_for_import(
+                version_name, loader, loader_version, report
+            )
+            
             report(100, 100, "导入完成!")
             
-            return {
+            result = {
                 'success': True,
                 'version_name': version_name,
                 'downloaded': downloaded_count,
                 'total': downloaded_count,
                 'errors': []
             }
+            if loader_warning:
+                result['warning'] = loader_warning
+            return result
 
     def _download_missing_libraries(self, libraries: list):
         """Download any libraries that are not yet on disk (parallel)"""
@@ -817,9 +872,13 @@ class ModpackImporter:
             logger.warning(f"获取 CurseForge 文件信息失败 {project_id}/{file_id}: {e}")
             return None
 
-    def _download_file(self, url: str, dest: Path, total_timeout: int = 180):
-        """Download a file with content validation and total timeout"""
-        import time
+    def _download_file(self, url: str, dest: Path, total_timeout: int = 180,
+                       progress_cb: Optional[Callable[[int, int], None]] = None):
+        """Download a file with content validation and total timeout.
+
+        progress_cb, if given, is called as progress_cb(bytes_done, bytes_total)
+        after each chunk (bytes_total may be 0 when Content-Length is absent).
+        """
         start_time = time.time()
         
         try:
@@ -831,10 +890,18 @@ class ModpackImporter:
             if dest.suffix == ".jar" and "html" in content_type.lower():
                 raise ValueError(f"Downloaded HTML instead of JAR from {url}")
             
+            size = int(resp.headers.get("content-length") or 0)
+            done = 0
             with open(dest, 'wb') as f:
                 for chunk in resp.iter_content(chunk_size=65536):
                     if chunk:
                         f.write(chunk)
+                        done += len(chunk)
+                        if progress_cb:
+                            try:
+                                progress_cb(done, size)
+                            except Exception:
+                                pass
                         if time.time() - start_time > total_timeout:
                             raise TimeoutError(f"Download timed out after {total_timeout}s: {url}")
         except Exception:
@@ -848,14 +915,47 @@ class ModpackImporter:
             dest.unlink()
             raise ValueError(f"Downloaded file too small ({file_size} bytes), likely HTML: {content[:100]}")
 
+    @staticmethod
+    def _tracked_progress_cb(filename: str, file_states: list, lock, report,
+                             counts: Callable[[], tuple], throttle: dict,
+                             interval: float = 0.15):
+        """Byte-level progress callback for _download_file().
+
+        Updates the matching file_state's `progress` (0-100) and emits a
+        report at most every `interval` seconds. `throttle` is a shared dict
+        per download batch so 16 parallel threads don't flood the UI.
+        counts() must return (downloaded, total) of the current batch.
+        """
+        def cb(done: int, size: int):
+            now = time.monotonic()
+            if now - throttle["t"] < interval:
+                return
+            with lock:
+                if now - throttle["t"] < interval:
+                    return
+                throttle["t"] = now
+                pct = int(done * 100 / size) if size > 0 else 0
+                for fs in file_states:
+                    if fs["name"] == filename and fs["status"] == "downloading":
+                        fs["progress"] = pct
+                        break
+                downloaded, total = counts()
+                report(0, 0, f"下载模组: {filename}", downloaded, total, list(file_states))
+        return cb
+
     def _ensure_vanilla_version(self, mc_version: str, report):
         """Download vanilla Minecraft version if not installed. Raises on failure."""
         try:
             installed = minecraft_launcher_lib.utils.get_installed_versions(str(self.minecraft_dir))
             installed_ids = [v.get("id") for v in installed if isinstance(v, dict)]
-            if mc_version in installed_ids:
+            # A version dir with a JSON but no client jar is a partial install —
+            # mll skips verified files, so fall through and let it finish.
+            client_jar = self.minecraft_dir / "versions" / mc_version / f"{mc_version}.jar"
+            if mc_version in installed_ids and client_jar.exists():
                 logger.info(f"原版 {mc_version} 已安装")
                 return
+            if mc_version in installed_ids:
+                logger.info(f"原版 {mc_version} 不完整 (缺少 client jar)，继续安装...")
             
             logger.info(f"下载原版 Minecraft {mc_version}...")
             report(91, 100, f"正在下载 Minecraft {mc_version}...")
@@ -1045,6 +1145,7 @@ class ModpackImporter:
         downloaded = 0
         errors = []
         file_states = []
+        throttle = {"t": 0.0}
         total_to_download = len(to_download)
         
         def download_one(idx_file):
@@ -1056,13 +1157,17 @@ class ModpackImporter:
             mod_path = mods_dir / filename
             
             with lock:
-                file_states.append({"name": filename, "status": "downloading"})
+                file_states.append({"name": filename, "status": "downloading", "progress": 0})
                 report(0, 0, f"下载模组 ({downloaded}/{total_to_download})", downloaded, total_to_download, list(file_states))
             
+            progress_cb = self._tracked_progress_cb(
+                filename, file_states, lock, report,
+                lambda: (downloaded, total_to_download), throttle
+            )
             for url in downloads:
                 for attempt in range(3):
                     try:
-                        self._download_file(url, mod_path)
+                        self._download_file(url, mod_path, progress_cb=progress_cb)
                         with lock:
                             downloaded += 1
                             for fs in file_states:
@@ -1074,7 +1179,6 @@ class ModpackImporter:
                     except Exception as e:
                         logger.warning(f"下载模组失败 {url} (尝试 {attempt+1}/3): {e}")
                         if attempt < 2:
-                            import time
                             time.sleep(2 * (attempt + 1))
             
             with lock:
@@ -1124,9 +1228,12 @@ class ModpackImporter:
         now = datetime.now(timezone.utc).isoformat()
         
         # Base version JSON structure
+        # jar points at the vanilla client jar so the classpath resolves even
+        # though this JSON has no jar of its own (mll: classpath jar = jar field)
         version_json = {
             "id": version_name,
             "inheritsFrom": mc_version,
+            "jar": mc_version,
             "type": "release",
             "mainClass": "net.minecraft.client.main.Main",
             "libraries": [],
@@ -1155,10 +1262,13 @@ class ModpackImporter:
                 version_json["mainClass"] = "net.fabricmc.loader.impl.launch.knot.KnotClient"
         
         elif loader == "forge" and loader_version:
-            version_json["mainClass"] = "net.minecraftforge.fml.loading.FMLClientTweaker"
+            # Libraries/mainClass come from _install_loader_for_import() after
+            # this JSON is written — no fake FMLClientTweaker placeholder.
+            pass
         
         elif loader == "neoforge" and loader_version:
-            version_json["mainClass"] = "cpw.mods.fml.relauncher.FMLTweaker"
+            # Same as forge: merged in by _install_loader_for_import().
+            pass
         
         elif loader == "quilt" and loader_version:
             try:
@@ -1180,6 +1290,42 @@ class ModpackImporter:
         version_json_path = version_dir / f"{version_name}.json"
         with open(version_json_path, 'w', encoding='utf-8') as f:
             json.dump(version_json, f, indent=2, ensure_ascii=False)
+
+    def _install_loader_for_import(self, version_name: str, loader: str,
+                                   loader_version: str, report) -> str:
+        """Install Forge/NeoForge into a freshly created pack version JSON.
+
+        Fabric/Quilt are already fully handled inside _create_version_json()
+        (they fetch their meta directly), so this only runs for Forge family
+        loaders which need the real installer run. Returns '' on success or a
+        human-readable warning string on failure.
+        """
+        if loader not in ("forge", "neoforge") or not loader_version:
+            return ""
+        display = loader.upper()
+        logger.info(f"为导入版本 {version_name} 安装 {display} {loader_version}")
+
+        def cb(status):
+            # Loader APIs call setStatus with plain strings
+            try:
+                report(95, 100, f"安装 {display}: {status}")
+            except Exception:
+                pass
+
+        try:
+            from launcher_core.api_modloaders import install_mod_loader
+            ok = install_mod_loader(
+                loader, version_name, loader_version,
+                str(self.minecraft_dir),
+                callback={"setStatus": cb},
+            )
+            if not ok:
+                return f"{display} 安装失败，可在版本设置中手动安装"
+            logger.info(f"{display} {loader_version} 已合并到 {version_name}")
+            return ""
+        except Exception as e:
+            logger.exception(f"{display} 安装失败: {e}")
+            return f"{display} 安装失败: {e}"
 
 
 # Singleton

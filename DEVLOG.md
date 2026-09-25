@@ -70,3 +70,48 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 ### 自动化验证（mock 下载，不走网络）
 - 4 个格式路径（mrpack 根索引 / overrides 索引 / CurseForge / MultiMC）均通过：文件计数全程单调不回退、末段阶段携带计数、done/error 状态齐全、版本 JSON 与隔离 mods 目录生成正确
 - `python -m py_compile` + `node --check`（提取的 `<script>`）通过
+
+## 2026-09-25 — 字节级实时进度 & Forge 导入修复
+
+### 优化：导入进度条改为字节级实时
+之前 `_download_file` 只在**文件完成时**汇报一次，文件条 0%→100% 直接跳变，副标题只在完成时更新计数。
+
+**改动：**
+- `modpack_importer.py` — `_download_file` 新增 `progress_cb(bytes_done, bytes_total)`（64KB chunk 逐段回调）；新增静态 `_tracked_progress_cb()`：更新对应 file_state 的 `progress`（0-100），全批共享 `throttle` 字典按 0.15s 节流发 report（16 线程并发不刷爆 UI）
+- 四处下载循环（CurseForge / Modrinth / MultiMC / redownload）全部接入；CurseForge 路径补齐 file_states（此前没有）
+- `index.html` — 新增弹窗整体进度条 `#modpackImportOverallFill`：`overallPct = (已完成 + Σ进行中字节%) / 总数`；副标题在下载中追加 ` · NN%`（message 已含 `X/Y` 时不重复拼接）；文件条填充宽度改用 `f.progress`；侧边栏下载面板显示 `X/Y · NN%`、文件名旁显示当前百分比
+
+### 修复：导入 Forge 整合包后不显示加载器、启动缺库
+用户导入 The Other Side（Forge1.20.1）后加载器页显示"未安装"。三个根因：
+1. `_create_version_json()` 给 Forge 版本写**假** `mainClass: FMLClientTweaker` 且 `libraries: []`，真正的 Forge 从未安装
+2. `_import_modrinth` 不调用 `_ensure_vanilla_version()`，父版本 `versions/1.20.1` 目录根本不存在
+3. 版本 JSON 缺 `jar` 字段，classpath 不含原版 client jar
+
+**改动：**
+- `modpack_importer.py` — JSON 模板增加 `"jar": mc_version`；删除 forge/neoforge 假 mainClass 占位；新增 `_install_loader_for_import()`：forge/neoforge 走真实安装器合并（HMCL 式），fabric/quilt 仍由 JSON 模板内联（原逻辑已完整）；三条导入流程（CF/Modrinth/MultiMC）在创建 JSON 后调用并把失败转为 `warning` 透出；Modrinth 流程补调 `_ensure_vanilla_version()`
+- `modpack_importer.py` — `_ensure_vanilla_version` 改为**同时检查 client jar**：有 JSON 无 jar 的半安装状态不再被短路跳过
+
+### 修复：api_modloaders 对"整合包版本"水土不服
+`install_mod_loader` 把版本 id 当 MC 版本用，整合包 id（`The Other Side-1.20.1`）会让 Forge maven 坐标、Fabric meta URL 全部404；且 `install_mod_loader` 统一传 `installer_url=` 关键字，而 Fabric/Quilt/OptiFine/NeoForge 的 `install()` 签名没有该参数 → **TypeError**（OptiFine 还有裸用 `installer_url` 的 NameError，等于一直装不上）。
+
+**改动：**
+- `api_modloaders.py` — 新增 `_resolve_mc_version()`：沿 `inheritsFrom` 链（最多5层）取真实原版版本；Forge 用它拼 maven 坐标与 `installClient` 输出目录，Fabric/Quilt 用它拼 meta URL
+- `api_modloaders.py` — Forge 现代分支 forge 目录发现：构造 id 不存在时在 `versions/` 下按 `-Forge-<ver>` 后缀回退查找；合并时 `id=版本名`、`jar` 有 `inheritsFrom` 时保持父版本（不再覆盖成整合包自身）
+- `api_modloaders.py` — Fabric/Quilt/OptiFine/NeoForge `install()` 全部补 `installer_url` 参数；NeoForge 从安装器 `install_profile.json` 指向的 version.json 合并 `mainClass`/`arguments`（此前只合库，缺 mainClass 起不来）
+- `api_modloaders.py` — `get_installed_loaders()` 沿 `inheritsFrom` 链合并父版本 libraries 再检测（父版本装了加载器时子版本也能识别）
+- `main.py` — `installModLoader()` 删除"把整合包版本解析回原版父版本"的逻辑，加载器直接装进所选版本 JSON
+
+### 优化：模组列表加载提速
+`loadMods()` 串行逐 jar 解压两次（元数据 + 图标）再 base64 进大 JSON，60+ 模组明显卡顿。
+
+**改动：**
+- `main.py` — `ThreadPoolExecutor(8)` 并行构建 `ModInfo`；持久缓存 `modcache.json`（与 mods 目录同级），键 `文件名|size|mtime`，仅写当前文件防膨胀；任一 jar 变更自动重建
+
+### 修复：用户包 The Other Side-1.20.1（实机）
+- 用修好的管线重跑：补装原版 1.20.1（json+jar+资源，libraries.minecraft.net SSL 抖动用串行回填脚本收敛）、重写版本 JSON、安装 Forge 47.4.22 并合并（29 库、`mainClass=BootstrapLauncher`、`jar=1.20.1`、检测出 forge）
+- `minecraft_launcher_lib.command.get_minecraft_command` 干跑：classpath 94 项含原版 jar 与 11 个 forge 库，mainClass 正确
+
+### 自动化验证（mock 下载，不走网络）
+- 重建离线测试套件（临时文件丢失后重写）：4 条流程 + 不支持格式 全过
+  - 断言字节级进度（存在 `progress=50` 的 downloading 状态快照）、文件计数单调、下载后粘性计数、`_ensure_vanilla_version` 按 MC 版本调用、`install_mod_loader` 收到 `(loader, 版本名, loader_ver, minecraft_dir)`、fabric 内联 JSON 分支不触发安装器
+- `python -m py_compile`（main + 4 个 launcher_core 模块）+ `node --check`（提取 `<script>`）通过

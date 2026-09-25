@@ -166,6 +166,31 @@ def _detect_loaders_from_libraries(libs: list) -> list[dict]:
     return detected
 
 
+def _resolve_mc_version(minecraft_dir: str, version_id: str) -> str:
+    """Resolve the vanilla Minecraft version behind a version JSON.
+
+    Follows the inheritsFrom chain (up to 5 levels) and falls back to
+    version_id itself. Used so loader installers that need the real MC
+    version (maven coordinates, Fabric meta URL, ...) work when the
+    target version is a modpack JSON like "The Other Side-1.20.1".
+    """
+    cur = version_id
+    for _ in range(5):
+        path = os.path.join(minecraft_dir, "versions", cur, f"{cur}.json")
+        if not os.path.exists(path):
+            break
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            break
+        parent = data.get("inheritsFrom") or data.get("jar")
+        if not parent or parent == cur:
+            break
+        cur = parent
+    return cur
+
+
 # === Mod Loader Version Data ===
 
 @dataclass
@@ -222,7 +247,7 @@ class FabricAPI:
         return stable[0] if stable else (versions[0] if versions else None)
 
     def install(self, game_version: str, loader_version: str, minecraft_dir: str,
-                callback: dict = None) -> bool:
+                callback: dict = None, installer_url: str = "") -> bool:
         """Install Fabric loader by merging into existing version JSON.
         
         HMCL-inspired approach:
@@ -244,12 +269,15 @@ class FabricAPI:
                 logger.error(f"版本 JSON 不存在: {version_json_path}")
                 return False
 
+            # Real MC version behind this JSON (modpack JSONs inherit from vanilla)
+            mc_version = _resolve_mc_version(minecraft_dir, game_version)
+
             # Step 1: Save vanilla JSON backup
             if not save_vanilla_json(version_dir, game_version):
                 logger.warning("保存 vanilla JSON 备份失败，继续安装...")
 
             # Step 2: Fetch Fabric launcher meta
-            meta_url = f"{self.BASE_URL}/versions/loader/{game_version}/{loader_version}/profile/json"
+            meta_url = f"{self.BASE_URL}/versions/loader/{mc_version}/{loader_version}/profile/json"
             resp = requests.get(meta_url, headers={"User-Agent": USER_AGENT}, timeout=15)
             resp.raise_for_status()
             fabric_meta = resp.json()
@@ -362,7 +390,11 @@ class ForgeAPI:
 
             set_status("正在安装 Forge...")
 
-            forge_full = f"{game_version}-{loader_version}"
+            # Real MC version behind this JSON (modpack JSONs inherit from vanilla).
+            # The Forge maven coordinates and the installer's output directory are
+            # always based on the vanilla MC version, never on the pack's name.
+            mc_version = _resolve_mc_version(minecraft_dir, game_version)
+            forge_full = f"{mc_version}-{loader_version}"
 
             # Use provided installer_url or construct from Maven
             if installer_url:
@@ -416,7 +448,7 @@ class ForgeAPI:
 
             # Step 2: Determine Forge version for install method
             # Forge 1.13+ uses --installClient; older versions are extracted as ZIP
-            mc_version_parts = game_version.split(".")
+            mc_version_parts = mc_version.split(".")
             mc_major = int(mc_version_parts[0]) if mc_version_parts else 0
             mc_minor = int(mc_version_parts[1]) if len(mc_version_parts) > 1 else 0
             is_old_forge = (mc_major < 1 or (mc_major == 1 and mc_minor < 13))
@@ -424,7 +456,7 @@ class ForgeAPI:
             if is_old_forge:
                 # Old Forge (1.12.2 and earlier): extract from install_profile.json
                 set_status("解压 Forge 安装器...")
-                forge_id = f"{game_version}-Forge-{loader_version}"
+                forge_id = f"{mc_version}-Forge-{loader_version}"
                 forge_dir = os.path.join(minecraft_dir, "versions", forge_id)
 
                 with zipfile.ZipFile(installer_path, "r") as zf:
@@ -507,9 +539,9 @@ class ForgeAPI:
                                 existing_args[key].extend(forge_args[key])
                         original_data["arguments"] = existing_args
 
-                    # Update id and jar to match the actual version directory name
+                    # Update id/jar to match the actual version directory name
                     original_data["id"] = game_version
-                    original_data["jar"] = game_version
+                    original_data["jar"] = mc_version if original_data.get("inheritsFrom") else game_version
 
                     with open(original_json, "w", encoding="utf-8") as f:
                         json.dump(original_data, f, indent=2, ensure_ascii=False)
@@ -557,9 +589,26 @@ class ForgeAPI:
                     pass
 
                 # Step 3: Forge installer creates a new version directory
-                forge_id = f"{game_version}-Forge-{loader_version}"
+                forge_id = f"{mc_version}-Forge-{loader_version}"
                 forge_dir = os.path.join(minecraft_dir, "versions", forge_id)
                 forge_json = os.path.join(forge_dir, f"{forge_id}.json")
+
+                if not os.path.exists(forge_json):
+                    # Fallback: search versions/ for the directory the installer made
+                    # (its name always ends with "-Forge-<loader_version>")
+                    versions_root = os.path.join(minecraft_dir, "versions")
+                    suffix = f"-Forge-{loader_version}"
+                    try:
+                        for name in sorted(os.listdir(versions_root)):
+                            if name.endswith(suffix):
+                                cand = os.path.join(versions_root, name, f"{name}.json")
+                                if os.path.exists(cand):
+                                    forge_dir = os.path.join(versions_root, name)
+                                    forge_json = cand
+                                    logger.info(f"Forge 版本目录: {name}")
+                                    break
+                    except OSError:
+                        pass
 
                 if os.path.exists(forge_json):
                     with open(forge_json, "r", encoding="utf-8") as f:
@@ -587,6 +636,9 @@ class ForgeAPI:
                                 existing_args.setdefault(key, [])
                                 existing_args[key].extend(forge_args[key])
                         original_data["arguments"] = existing_args
+
+                    original_data["id"] = game_version
+                    original_data["jar"] = mc_version if original_data.get("inheritsFrom") else game_version
 
                     with open(original_json, "w", encoding="utf-8") as f:
                         json.dump(original_data, f, indent=2, ensure_ascii=False)
@@ -658,14 +710,14 @@ class NeoForgeAPI:
         return versions[0] if versions else None
 
     def install(self, game_version: str, loader_version: str, minecraft_dir: str,
-                callback: dict = None) -> bool:
+                callback: dict = None, installer_url: str = "") -> bool:
         """Install NeoForge by extracting from installer and merging into existing version.
         
         HMCL-inspired approach:
         1. Save vanilla JSON backup
         2. Download NeoForge installer
         3. Extract install_profile.json
-        4. Merge libraries into existing version
+        4. Merge libraries, mainClass, arguments into existing version
         """
         try:
             if callback is None:
@@ -686,7 +738,8 @@ class NeoForgeAPI:
                 logger.warning("保存 vanilla JSON 备份失败，继续安装...")
 
             # Step 2: Download NeoForge installer
-            installer_url = f"{self.BMCLAPI_URL}/neoforge/download/{loader_version}"
+            if not installer_url:
+                installer_url = f"{self.BMCLAPI_URL}/neoforge/download/{loader_version}"
             installer_path = os.path.join(version_dir, f"neoforge-{loader_version}-installer.jar")
 
             set_status("下载 NeoForge 安装器...")
@@ -695,14 +748,25 @@ class NeoForgeAPI:
             with open(installer_path, "wb") as f:
                 shutil.copyfileobj(resp.raw, f)
 
-            # Step 3: Extract install_profile.json
+            # Step 3: Extract install_profile.json + the version JSON it points to
+            nf_data = {}
             with zipfile.ZipFile(installer_path, "r") as zf:
-                if "install_profile.json" in zf.namelist():
+                zip_names = zf.namelist()
+                if "install_profile.json" in zip_names:
                     with zf.open("install_profile.json") as ipf:
                         install_profile = json.load(ipf)
                 else:
                     logger.error("NeoForge 安装器中未找到 install_profile.json")
                     return False
+
+                # The real NeoForge version JSON (mainClass/arguments live here,
+                # install_profile.json only carries the libraries)
+                version_json_name = install_profile.get("json", "version.json")
+                if version_json_name in zip_names:
+                    with zf.open(version_json_name) as vf:
+                        nf_data = json.load(vf)
+                else:
+                    logger.warning(f"NeoForge 安装器中未找到 {version_json_name}")
 
             # Step 4: Read existing version JSON
             with open(version_json_path, "r", encoding="utf-8") as f:
@@ -719,6 +783,18 @@ class NeoForgeAPI:
             # Add NeoForge libraries
             existing_libs.extend(forge_libs)
             version_data["libraries"] = existing_libs
+
+            # Merge mainClass / arguments from the NeoForge version JSON
+            if nf_data.get("mainClass"):
+                version_data["mainClass"] = nf_data["mainClass"]
+            if nf_data.get("arguments"):
+                existing_args = version_data.get("arguments", {})
+                nf_args = nf_data.get("arguments", {})
+                for key in ["game", "jvm"]:
+                    if key in nf_args:
+                        existing_args.setdefault(key, [])
+                        existing_args[key].extend(nf_args[key])
+                version_data["arguments"] = existing_args
 
             # Write back
             with open(version_json_path, "w", encoding="utf-8") as f:
@@ -778,7 +854,7 @@ class QuiltAPI:
         return stable[0] if stable else (versions[0] if versions else None)
 
     def install(self, game_version: str, loader_version: str, minecraft_dir: str,
-                callback: dict = None) -> bool:
+                callback: dict = None, installer_url: str = "") -> bool:
         """Install Quilt loader by merging into existing version JSON.
         
         HMCL-inspired approach:
@@ -800,12 +876,15 @@ class QuiltAPI:
                 logger.error(f"版本 JSON 不存在: {version_json_path}")
                 return False
 
+            # Real MC version behind this JSON (modpack JSONs inherit from vanilla)
+            mc_version = _resolve_mc_version(minecraft_dir, game_version)
+
             # Step 1: Save vanilla JSON backup
             if not save_vanilla_json(version_dir, game_version):
                 logger.warning("保存 vanilla JSON 备份失败，继续安装...")
 
             # Step 2: Fetch Quilt launcher meta
-            meta_url = f"{self.BASE_URL}/versions/loader/{game_version}/{loader_version}/profile/json"
+            meta_url = f"{self.BASE_URL}/versions/loader/{mc_version}/{loader_version}/profile/json"
             resp = requests.get(meta_url, headers={"User-Agent": USER_AGENT}, timeout=15)
             resp.raise_for_status()
             quilt_meta = resp.json()
@@ -893,7 +972,7 @@ class OptiFineAPI:
         return stable[0] if stable else (versions[0] if versions else None)
 
     def install(self, game_version: str, loader_version: str, minecraft_dir: str,
-                callback: dict = None) -> bool:
+                callback: dict = None, installer_url: str = "") -> bool:
         """Install OptiFine by adding it as a library.
         
         HMCL-inspired approach:
@@ -1095,7 +1174,11 @@ def remove_mod_loader(version_dir: str, version_id: str, loader_type: str) -> bo
 
 
 def get_installed_loaders(version_json_path: str) -> list[dict]:
-    """Detect installed mod loaders from a version JSON"""
+    """Detect installed mod loaders from a version JSON.
+
+    Follows the inheritsFrom chain (up to 5 levels) so loaders merged into
+    a parent version JSON are still detected for child versions.
+    """
     try:
         if not os.path.exists(version_json_path):
             return []
@@ -1103,7 +1186,27 @@ def get_installed_loaders(version_json_path: str) -> list[dict]:
         with open(version_json_path, "r", encoding="utf-8") as f:
             version_data = json.load(f)
 
-        libs = version_data.get("libraries", [])
+        libs = list(version_data.get("libraries", []))
+
+        # Walk the inheritance chain (versions/<child>/<child>.json -> parent)
+        versions_root = os.path.dirname(os.path.dirname(version_json_path))
+        parent_id = version_data.get("inheritsFrom")
+        seen_ids = {os.path.basename(os.path.dirname(version_json_path))}
+        for _ in range(5):
+            if not parent_id or parent_id in seen_ids:
+                break
+            seen_ids.add(parent_id)
+            parent_json = os.path.join(versions_root, parent_id, f"{parent_id}.json")
+            if not os.path.exists(parent_json):
+                break
+            try:
+                with open(parent_json, "r", encoding="utf-8") as f:
+                    parent_data = json.load(f)
+            except Exception:
+                break
+            libs.extend(parent_data.get("libraries", []))
+            parent_id = parent_data.get("inheritsFrom")
+
         detected = []
 
         for lib in libs:

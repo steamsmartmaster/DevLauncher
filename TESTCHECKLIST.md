@@ -51,3 +51,28 @@
 - [ ] 游戏启动功能正常
 - [ ] 版本隔离切换正常
 - [ ] 主题切换正常
+
+## 9. 字节级实时进度（2026-09-25 修复）
+- [ ] 导入模组包时，文件列表里下载中的条目进度条**连续**从 0% 走到 100%（不再 0→100 跳变）
+- [ ] 弹窗整体进度条随字节推进平滑增长，副标题显示 `… · NN%`
+- [ ] 同时下载多个文件时，多个条目各自推进，百分比更新不卡顿（0.15s 节流）
+- [ ] 侧边栏下载面板计数显示 `X/Y · NN%`，文件名旁显示该文件当前百分比
+- [ ] 下载完成后文件条变绿 ✓，整体进度与计数一致
+- [ ] CurseForge 包导入同样有 per-file 进度（本版新增 file_states）
+
+## 10. Forge/NeoForge 安装与显示（2026-09-25 修复）
+- [ ] 导入 Forge mrpack（如 The Other Side-1.20.1）后，加载器页显示 Forge 及其版本号
+- [ ] 版本 JSON：`jar` = 原版版本、`mainClass` = `BootstrapLauncher`（不再是 FMLClientTweaker 占位）、libraries 非空
+- [ ] 启动命令干跑包含原版 client jar 与 forge 库（不缺 `1.20.1.jar`）
+- [ ] 全新导入（本地无原版 1.20.1）时自动补装原版 json/jar/资源
+- [ ] 加载器页对整合包版本直接安装加载器（装进包 JSON，而非原版父版本）
+- [ ] Fabric / Quilt / OptiFine / NeoForge 安装不再报 `unexpected keyword 'installer_url'`
+- [ ] NeoForge 安装后 mainClass 生效（从安装器 version.json 合并）
+- [ ] 半安装状态（有 JSON 无 client jar）重试导入会补齐原版
+- [ ] 导入失败的加载器安装在结果页显示 warning，模组下载成果不丢
+
+## 11. 模组列表加载速度（2026-09-25 优化）
+- [ ] 60+ 模组的版本切到模组页，列表快速出现（8 线程并行解析）
+- [ ] 二次进入模组页走 `modcache.json` 缓存，几乎瞬时
+- [ ] 替换/新增/删除 jar 后列表内容正确（缓存键含 size/mtime）
+- [ ] 图标与模组元数据（fabric.mod.json / mcmod.info）显示正常

@@ -2114,7 +2114,10 @@
                                     <span id="modpackImportStepIcon" style="font-size:18px;">→</span>
                                     <span style="font-size:15px;font-weight:600;" id="modpackImportStepTitle">安装整合包</span>
                                 </div>
-                                <div style="color:rgba(255,255,255,0.6);font-size:13px;margin-bottom:12px;" id="modpackImportStepSubtitle">准备中...</div>
+                                <div style="color:rgba(255,255,255,0.6);font-size:13px;margin-bottom:6px;" id="modpackImportStepSubtitle">准备中...</div>
+                                <div style="height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;margin-bottom:12px;">
+                                    <div id="modpackImportOverallFill" style="height:100%;width:0%;background:var(--accent-color,#4fc3f7);border-radius:3px;transition:width 0.3s;"></div>
+                                </div>
                                 <div id="modpackImportFileList" style="max-height:280px;overflow-y:auto;"></div>
                                 <div style="margin-top:12px;font-size:12px;color:rgba(255,255,255,0.4);display:flex;justify-content:space-between;" id="modpackImportSpeed"></div>
                             </div>
@@ -3869,14 +3872,43 @@
                 display_downloaded = current;
             }
 
+            // Fractional bytes of in-flight downloads (0-1), for the overall bar
+            var frac = 0, nDownloading = 0;
+            if (file_states && file_states.length > 0) {
+                for (var si = 0; si < file_states.length; si++) {
+                    var sf = file_states[si];
+                    if (sf.status === 'downloading') {
+                        nDownloading++;
+                        frac += (sf.progress || 0) / 100;
+                    }
+                }
+            }
+            var overallPct = 0;
+            if (file_total > 0) {
+                overallPct = Math.min(100, Math.round((file_downloaded + frac) * 100 / file_total));
+            } else if (modpackImportLastFileCount.total > 0) {
+                overallPct = Math.round(modpackImportLastFileCount.downloaded * 100 / modpackImportLastFileCount.total);
+            } else if (total > 0) {
+                overallPct = Math.min(100, Math.round(current * 100 / total));
+            }
+
+            var overallFill = document.getElementById('modpackImportOverallFill');
+            if (overallFill) {
+                overallFill.style.width = overallPct + '%';
+            }
+
             var subtitle = document.getElementById('modpackImportStepSubtitle');
             if (subtitle) {
-                if (display_total > 0) {
-                    // Phase label + stable count so it never looks like it restarts from 1
-                    subtitle.textContent = (message || '下载必要文件') + ' — ' + display_downloaded + '/' + display_total;
-                } else {
-                    subtitle.textContent = message || '准备中...';
+                var base = message || '准备中...';
+                var label = base;
+                // Only append the count when the message itself doesn't already contain it
+                if (display_total > 0 && base.indexOf(display_downloaded + '/' + display_total) === -1) {
+                    label = base + ' — ' + display_downloaded + '/' + display_total;
                 }
+                if (nDownloading > 0) {
+                    label += ' · ' + overallPct + '%';
+                }
+                subtitle.textContent = label;
             }
 
             // Show step as complete if all file downloads done
@@ -3898,7 +3930,7 @@
                 for (var i = 0; i < maxShow; i++) {
                     var f = showFiles[i];
                     var barColor = f.status === 'done' ? '#4caf50' : (f.status === 'error' ? '#f44336' : 'var(--accent-color,#4fc3f7)');
-                    var barWidth = f.status === 'done' ? '100%' : (f.status === 'error' ? '100%' : '0%');
+                    var barWidth = f.status === 'done' ? '100%' : (f.status === 'error' ? '100%' : ((f.progress || 0) + '%'));
                     var statusIcon = f.status === 'done' ? '✓' : (f.status === 'error' ? '✗' : '');
                     html += '<div class="hmcl-file-item">' +
                         '<div class="hmcl-file-name">' + (statusIcon ? '<span class="hmcl-file-status" style="color:' + barColor + '">' + statusIcon + '</span> ' : '') + f.name + '</div>' +
@@ -4731,16 +4763,23 @@
                                     iconClass += 'error';
                                     iconContent = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
                                 }
-                                html += '<div class="download-file-item"><div class="' + iconClass + '">' + iconContent + '</div><span class="file-name">' + f.name + '</span></div>';
+                                html += '<div class="download-file-item"><div class="' + iconClass + '">' + iconContent + '</div><span class="file-name">' + f.name + (f.status === 'downloading' && f.progress > 0 ? ' <span style="opacity:0.6;">' + f.progress + '%</span>' : '') + '</span></div>';
                             }
                             fileList.innerHTML = html;
                             fileList.scrollTop = fileList.scrollHeight;
                         }
                         
-                        // Update progress bar
+                        // Update progress bar (fractional: done files + in-flight bytes)
                         if (detail.file_total > 0) {
-                            document.getElementById('downloadProgressCount').textContent = detail.file_downloaded + '/' + detail.file_total;
-                            var pct = Math.round(detail.file_downloaded / detail.file_total * 100);
+                            var frac = 0;
+                            if (detail.files) {
+                                for (var fi = 0; fi < detail.files.length; fi++) {
+                                    if (detail.files[fi].status === 'downloading') frac += (detail.files[fi].progress || 0) / 100;
+                                }
+                            }
+                            var pct = Math.min(100, Math.round((detail.file_downloaded + frac) * 100 / detail.file_total));
+                            document.getElementById('downloadProgressCount').textContent =
+                                detail.file_downloaded + '/' + detail.file_total + ' · ' + pct + '%';
                             document.getElementById('progressFill').style.width = pct + '%';
                             document.getElementById('progressFill').style.animation = 'none';
                         } else {

@@ -1092,7 +1092,8 @@ class LauncherBridge(QObject):
     def installModLoader(self, game_version: str, loader_type: str, loader_version: str,
                          installer_url: str = "", custom_name: str = ""):
         """Install a mod loader onto a version.
-        game_version can be a version_id — it will be resolved to actual game version.
+        game_version is installed directly (modpack JSONs merge in place; the
+        APIs resolve the real MC version via inheritsFrom when they need it).
         If custom_name is provided, rename the version after install."""
         logger.info(f"安装模组加载器: {loader_type} {loader_version} -> {game_version}, url={installer_url[:60] if installer_url else 'N/A'}, custom_name={custom_name}")
         def _install():
@@ -1100,20 +1101,9 @@ class LauncherBridge(QObject):
                 self.progressUpdate.emit(-1, status)
 
             try:
-                # Resolve version_id to actual game_version if needed
-                resolved_version = game_version
-                if not self.versions.is_valid_game_version(game_version):
-                    json_path = self.versions.get_version_json_path(game_version)
-                    if os.path.exists(json_path):
-                        with open(json_path, "r", encoding="utf-8") as f:
-                            vd = json.load(f)
-                        resolved_version = vd.get("inheritsFrom", vd.get("clientVersion", game_version))
-                        if not self.versions.is_valid_game_version(resolved_version):
-                            resolved_version = game_version
-
                 self.gameStateChanged.emit("installing", f"正在安装 {LOADER_DISPLAY_NAMES.get(loader_type, loader_type)}...")
                 success = install_mod_loader(
-                    loader_type, resolved_version, loader_version,
+                    loader_type, game_version, loader_version,
                     self.settings.get("minecraft_dir"),
                     callback={"setStatus": on_status},
                     installer_url=installer_url
@@ -1575,12 +1565,65 @@ class LauncherBridge(QObject):
                             if item.is_file() and item.suffix == ".jar":
                                 jar_files.append(item)
                 
-                # Use ModInfo to extract metadata
+                # Use ModInfo to extract metadata (parallel + persistent cache,
+                # because each jar is unzipped twice: metadata + icon)
                 from launcher_core.mod_manager import ModInfo
-                for jar in jar_files:
-                    mod_info_obj = ModInfo(str(jar))
-                    mod_info = mod_info_obj.to_dict()
-                    mods.append(mod_info)
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                cache_path = mods_path / "modcache.json"
+                cache = {}
+                try:
+                    if cache_path.exists():
+                        with open(cache_path, "r", encoding="utf-8") as f:
+                            cache = json.load(f)
+                except Exception:
+                    cache = {}
+
+                def _cache_key(jar: Path):
+                    try:
+                        st = jar.stat()
+                        return f"{jar.name}|{st.st_size}|{int(st.st_mtime)}"
+                    except OSError:
+                        return None
+
+                def _build(jar: Path):
+                    return jar, ModInfo(str(jar)).to_dict()
+
+                keys = [_cache_key(j) for j in jar_files]
+                mods = [None] * len(jar_files)
+                missing = []
+                for i in range(len(jar_files)):
+                    k = keys[i]
+                    if k and isinstance(cache.get(k), dict):
+                        mods[i] = cache[k]
+                    else:
+                        missing.append(i)
+
+                if missing:
+                    with ThreadPoolExecutor(max_workers=8) as ex:
+                        futs = {ex.submit(_build, jar_files[i]): i for i in missing}
+                        for fut in as_completed(futs):
+                            i = futs[fut]
+                            try:
+                                _jar, data = fut.result()
+                                mods[i] = data
+                            except Exception as e:
+                                logger.warning(f"读取模组失败 {jar_files[i].name}: {e}")
+
+                # Persist cache (only current files, so it never grows stale)
+                if missing:
+                    try:
+                        rebuilt = {}
+                        for i, m in enumerate(mods):
+                            if m and keys[i]:
+                                rebuilt[keys[i]] = m
+                        if rebuilt:
+                            with open(cache_path, "w", encoding="utf-8") as f:
+                                json.dump(rebuilt, f, ensure_ascii=False)
+                    except Exception as e:
+                        logger.debug(f"写入模组缓存失败: {e}")
+
+                mods = [m for m in mods if m]
                 result = json.dumps(mods)
                 self.modsLoaded.emit(result)
             except Exception as e:
