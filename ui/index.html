@@ -3987,8 +3987,17 @@
                         '<div class="hmcl-file-bar"><div class="hmcl-file-bar-fill" style="width:' + barWidth + ';background:' + barColor + '"></div></div>' +
                         '</div>';
                 }
-                if (showFiles.length > 15) {
-                    html += '<div style="text-align:center;color:rgba(255,255,255,0.4);font-size:12px;padding:4px;">... 还有 ' + (showFiles.length - 15) + ' 个文件</div>';
+                // "还有 N 个文件" = files not yet settled (queued + unstarted +
+                // in-flight), so the count shrinks as downloads complete instead
+                // of growing with every started file.
+                var settledCount = 0;
+                for (var sk = 0; sk < file_states.length; sk++) {
+                    var stt = file_states[sk].status;
+                    if (stt === 'done' || stt === 'error') settledCount++;
+                }
+                var remainingFiles = trackedTotal > 0 ? Math.max(0, trackedTotal - settledCount) : 0;
+                if (remainingFiles > 0) {
+                    html += '<div style="text-align:center;color:rgba(255,255,255,0.4);font-size:12px;padding:4px;">... 还有 ' + remainingFiles + ' 个文件</div>';
                 }
                 var prevScroll = fileList.scrollTop;
                 fileList.innerHTML = html;

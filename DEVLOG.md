@@ -152,3 +152,10 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - `ui/index.html` — 侧栏整体条把 `error` 文件按"已结算"计 1（与模态字节语义一致；不计入 fd 的 error 不再让条回退，最后一个文件失败时侧栏也能走满）
 
 **验证**：套件 7/7（新增 `retry-progress-monotonic`：attempt-1 90% 失败 → attempt-2 从 0 重下，断言该文件 downloading 状态序列不降）；`node --check`；重放无 dip
+
+### 修复：文件列表底部"还有 N 个文件"越下载越多
+**根因**：`N = showFiles.length - 15`，而 showFiles = 已开始的文件（downloading+error+done，不含 queued）——文件一旦开始就永远留在 showFiles 里，所以 N 随下载推进从 1 涨到 total-15，方向与"剩余"语义完全相反。
+
+**修复**：`N = trackedTotal - (done+error)`，即**剩余未完成数**（queued+未开始+下载中），随完成递减、归 0 后整行隐藏；重试中（status 仍 downloading）不计入 settled，不会假降。
+
+**验证**：重放脚本新增 30 文件合成场景 —— 旧代码 `remSeq=[0,...,1,2,...,15]` 增长（红）→ 新代码 `[30,30,29,...,1,0]` 递减（绿）；4 条真实流 remOK=true；`node --check` + 套件 7/7
