@@ -370,7 +370,8 @@ class ModpackImporter:
                     
                     mod_path = mods_dir / filename
                     with lock:
-                        file_states.append({"name": filename, "status": "downloading", "progress": 0})
+                        file_states.append({"name": filename, "status": "downloading", "progress": 0,
+                                            "size": int(file_info.get('fileLength') or 0)})
                         report(0, 0, f"下载模组: {filename}", downloaded, total, list(file_states))
                     progress_cb = self._tracked_progress_cb(
                         filename, file_states, lock, report,
@@ -524,9 +525,17 @@ class ModpackImporter:
             downloaded = 0
             errors = []
             lock = Lock()
-            file_states = []  # Track all file states
             throttle = {"t": 0.0}
-            
+            # Pre-register every file (name + size) so byte-weighted progress
+            # has a stable denominator from the very first report.
+            file_states = [
+                {"name": Path(f.get('path', '') or f"file_{i}").name or f"file_{i}",
+                 "status": "queued", "progress": 0,
+                 "size": int(f.get('primarySize') or 0)}
+                for i, f in enumerate(files)
+            ]
+            report(0, 0, f"下载模组 (0/{total})", 0, total, list(file_states))
+
             def download_one(idx_file):
                 nonlocal downloaded
                 idx, file_entry = idx_file
@@ -537,7 +546,11 @@ class ModpackImporter:
                 
                 # Mark as downloading
                 with lock:
-                    file_states.append({"name": filename, "status": "downloading", "progress": 0})
+                    if idx < len(file_states):
+                        file_states[idx].update({"name": filename, "status": "downloading", "progress": 0})
+                    else:
+                        file_states.append({"name": filename, "status": "downloading", "progress": 0,
+                                            "size": int(file_entry.get('primarySize') or 0)})
                     report(0, 0, f"下载模组 {downloaded}/{total}", downloaded, total, list(file_states))
                 
                 if not downloads:
@@ -721,10 +734,16 @@ class ModpackImporter:
                 files = modrinth_index.get('files', [])
                 if files:
                     total_files = len(files)
-                    file_states = []
                     throttle = {"t": 0.0}
                     lock = Lock()
-                    report(0, 0, f"下载模组 (0/{total_files})", 0, total_files, [])
+                    # Pre-register with sizes for byte-weighted progress
+                    file_states = [
+                        {"name": Path(f.get('path', '') or f"file_{i}").name or f"file_{i}",
+                         "status": "queued", "progress": 0,
+                         "size": int(f.get('primarySize') or 0)}
+                        for i, f in enumerate(files)
+                    ]
+                    report(0, 0, f"下载模组 (0/{total_files})", 0, total_files, list(file_states))
                     mods_dir.mkdir(exist_ok=True)
                     
                     def download_mod(idx_file):
@@ -736,7 +755,11 @@ class ModpackImporter:
                         mod_path = mods_dir / filename
                         
                         with lock:
-                            file_states.append({"name": filename, "status": "downloading", "progress": 0})
+                            if idx < len(file_states):
+                                file_states[idx].update({"name": filename, "status": "downloading", "progress": 0})
+                            else:
+                                file_states.append({"name": filename, "status": "downloading", "progress": 0,
+                                                    "size": int(file_entry.get('primarySize') or 0)})
                             report(0, 0, f"下载模组 ({downloaded_count}/{total_files})", downloaded_count, total_files, list(file_states))
                         
                         progress_cb = self._tracked_progress_cb(
@@ -937,6 +960,8 @@ class ModpackImporter:
                 pct = int(done * 100 / size) if size > 0 else 0
                 for fs in file_states:
                     if fs["name"] == filename and fs["status"] == "downloading":
+                        if size > 0 and not fs.get("size"):
+                            fs["size"] = int(size)
                         fs["progress"] = pct
                         break
                 downloaded, total = counts()

@@ -127,3 +127,17 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 **验证：**
 - 新增离线测试 `version-list-filter`：引用中的父版本隐藏、孤儿父版本隐藏、带 cfg 版本可见、删包不级联、写 cfg 转正 —— 6/6 全过
 - 实机 `.minecraft` 复查：可见 = 1.12.2 / 1.4.5 / Fabulously Optimized 10.2.2（1.20.1、1.20.2、1.21.11 幽灵目录保持隐藏）
+
+### 修复：导入文件列表强制回底 & 进度 98-99% 变慢
+1. 每次进度刷新（0.15s 节流）重建文件列表后执行 `scrollTop = scrollHeight`，用户往上翻立刻被拽回底部（下载面板同款问题）。
+2. 整体进度按**文件个数**加权：最后 1-2 个大文件只占 1/N 条宽，进度条在 98-99% 龟速爬行；下载收尾后提取/创建配置/补装原版/安装加载器阶段又把条钉死在 100%（有文件失败则钉死 98%），体感就是"一到 98-99% 就变慢"。
+
+**改动：**
+- `ui/index.html` — 文件列表**保留 scrollTop**（先存后恢复，不再强制回底）：导入弹窗 + 下载面板两处；副标题的 `— X/Y` 计数只在下载中或"已下载/导入完成"消息时追加（补装原版/安装加载器阶段不再带模组计数）
+- `ui/index.html` — 进度条**两段式 + 单调不回退**（新变量 `modpackImportLastPct`，导入开始/关闭归零）：下载阶段按**字节数**加权（有 size 时，否则回退按个数）占 0-85%；下载收尾后交给阶段值（85 提取 / 90 创建配置 / 91-93 补装原版 / 95 安装加载器 / 100 完成）；MultiMC 这种先解压(0-90)再下载的流程在 (lastPct, 99] 内继续推进，任何情况下进度条不倒退
+- `launcher_core/modpack_importer.py` — Modrinth/MultiMC 流程**预注册全部文件**（`name + size + status=queued`，size 取 `primarySize`），字节分母从第一份报告起就稳定；CurseForge 从 API `fileLength` 取 size（全部文件开始后同样进入字节加权）；`_tracked_progress_cb` 用 Content-Length 兜底回填 size；状态新增 `queued`（JS 只渲染 downloading/error/done，列表内容不变）
+- 失败/出错文件按"已结算"计入字节分子 → 最后一个文件重试失败也不再把进度钉死在 98%
+
+**验证：**
+- 离线套件 6/6：新增断言（终态 states 全部带 size、无 queued 残留、非 CF 流程首份 states 即预注册全量）
+- `node --check`（提取全部 `<script>`）+ `py_compile` 通过

@@ -3847,6 +3847,7 @@
             if (cancelBtn) { cancelBtn.setAttribute('disabled', 'disabled'); cancelBtn.textContent = '导入中...'; }
             modpackImporting = true;
             modpackImportLastFileCount = { downloaded: 0, total: 0 };
+            modpackImportLastPct = 0;
             
             if (pythonInterface && pythonInterface.importModpack) {
                 pythonInterface.importModpack(pendingModpackPath, versionName);
@@ -3854,6 +3855,7 @@
         }
 
         var modpackImportLastFileCount = { downloaded: 0, total: 0 };
+        var modpackImportLastPct = 0;
 
         function updateModpackImportProgress(current, total, message, file_downloaded, file_total, file_states) {
             // Prefer file-level counts (mod downloads). Fall back to overall only when no file counts seen yet.
@@ -3872,24 +3874,70 @@
                 display_downloaded = current;
             }
 
-            // Fractional bytes of in-flight downloads (0-1), for the overall bar
-            var frac = 0, nDownloading = 0;
+            // Per-file states: byte-weighted progress when every tracked file has a size
+            var nDownloading = 0, nQueued = 0, totalBytes = 0, doneBytes = 0, hasSize = true;
             if (file_states && file_states.length > 0) {
                 for (var si = 0; si < file_states.length; si++) {
                     var sf = file_states[si];
+                    var ssize = sf.size || 0;
+                    if (ssize <= 0) hasSize = false;
+                    totalBytes += ssize;
                     if (sf.status === 'downloading') {
                         nDownloading++;
-                        frac += (sf.progress || 0) / 100;
+                        doneBytes += ssize * (sf.progress || 0) / 100;
+                    } else if (sf.status === 'queued') {
+                        nQueued++;
+                    } else {
+                        doneBytes += ssize; // done or error: settled
                     }
                 }
             }
-            var overallPct = 0;
-            if (file_total > 0) {
-                overallPct = Math.min(100, Math.round((file_downloaded + frac) * 100 / file_total));
-            } else if (modpackImportLastFileCount.total > 0) {
-                overallPct = Math.round(modpackImportLastFileCount.downloaded * 100 / modpackImportLastFileCount.total);
-            } else if (total > 0) {
-                overallPct = Math.min(100, Math.round(current * 100 / total));
+
+            var trackedTotal = file_total > 0 ? file_total : modpackImportLastFileCount.total;
+            var downloadsActive = nDownloading > 0 || nQueued > 0 ||
+                (file_total > 0 && file_downloaded < file_total && (!file_states || file_states.length === 0));
+
+            // Download-stage percent (0-100): bytes when possible, else file count
+            var stagePct = 0;
+            if (downloadsActive) {
+                if (hasSize && totalBytes > 0 && trackedTotal > 0 &&
+                    file_states && file_states.length >= trackedTotal) {
+                    stagePct = Math.min(100, doneBytes * 100 / totalBytes);
+                } else {
+                    var inflight = 0;
+                    if (file_states) {
+                        for (var sj = 0; sj < file_states.length; sj++) {
+                            if (file_states[sj].status === 'downloading') {
+                                inflight += (file_states[sj].progress || 0) / 100;
+                            }
+                        }
+                    }
+                    stagePct = trackedTotal > 0 ? Math.min(100, (display_downloaded + inflight) * 100 / trackedTotal) : 0;
+                }
+            }
+
+            // Overall bar: downloads occupy 0-85%; once downloads settle the phase
+            // value takes over (85 extract / 90 config / 91-93 vanilla / 95 loader /
+            // 100 done). If a phase is already ahead (MultiMC extracts before its
+            // downloads), keep the bar moving inside (lastPct, 99] instead.
+            var overallPct;
+            if (downloadsActive) {
+                if (modpackImportLastPct >= 85) {
+                    overallPct = Math.round(modpackImportLastPct + (99 - modpackImportLastPct) * stagePct / 100);
+                } else {
+                    overallPct = Math.round(stagePct * 0.85);
+                }
+            } else if (modpackImportLastFileCount.total > 0 || file_total > 0) {
+                var phasePct = total > 0 ? current * 100 / total : 0;
+                overallPct = Math.round(Math.max(85, phasePct));
+            } else {
+                overallPct = total > 0 ? Math.min(100, Math.round(current * 100 / total)) : 0;
+            }
+            // Bar never steps backwards (overlapping phases, re-numbered reports)
+            if (overallPct < modpackImportLastPct) {
+                overallPct = modpackImportLastPct;
+            } else {
+                modpackImportLastPct = overallPct;
             }
 
             var overallFill = document.getElementById('modpackImportOverallFill');
@@ -3901,11 +3949,13 @@
             if (subtitle) {
                 var base = message || '准备中...';
                 var label = base;
-                // Only append the count when the message itself doesn't already contain it
-                if (display_total > 0 && base.indexOf(display_downloaded + '/' + display_total) === -1) {
+                // Counts only during downloads or 已下载/导入完成 messages —
+                // not appended to phase messages like "正在下载 Minecraft ..."
+                var showCounts = downloadsActive || base.indexOf('已下载') === 0 || base.indexOf('导入完成') === 0;
+                if (showCounts && display_total > 0 && base.indexOf(display_downloaded + '/' + display_total) === -1) {
                     label = base + ' — ' + display_downloaded + '/' + display_total;
                 }
-                if (nDownloading > 0) {
+                if (downloadsActive) {
                     label += ' · ' + overallPct + '%';
                 }
                 subtitle.textContent = label;
@@ -3918,7 +3968,7 @@
                 if (icon) icon.textContent = '✓';
             }
 
-            // Render file list with per-file progress bars
+            // Render file list with per-file progress bars (scroll position preserved)
             var fileList = document.getElementById('modpackImportFileList');
             if (fileList && file_states && file_states.length > 0) {
                 var html = '';
@@ -3940,8 +3990,9 @@
                 if (showFiles.length > 15) {
                     html += '<div style="text-align:center;color:rgba(255,255,255,0.4);font-size:12px;padding:4px;">... 还有 ' + (showFiles.length - 15) + ' 个文件</div>';
                 }
+                var prevScroll = fileList.scrollTop;
                 fileList.innerHTML = html;
-                fileList.scrollTop = fileList.scrollHeight;
+                fileList.scrollTop = prevScroll;
             }
         }
 
@@ -3992,6 +4043,7 @@
             document.getElementById('modpackImportModal').style.display = 'none';
             pendingModpackPath = '';
             modpackImportLastFileCount = { downloaded: 0, total: 0 };
+            modpackImportLastPct = 0;
             resetModpackImportCancelBtn();
         }
 
@@ -4765,8 +4817,9 @@
                                 }
                                 html += '<div class="download-file-item"><div class="' + iconClass + '">' + iconContent + '</div><span class="file-name">' + f.name + (f.status === 'downloading' && f.progress > 0 ? ' <span style="opacity:0.6;">' + f.progress + '%</span>' : '') + '</span></div>';
                             }
+                            var prevScroll = fileList.scrollTop;
                             fileList.innerHTML = html;
-                            fileList.scrollTop = fileList.scrollHeight;
+                            fileList.scrollTop = prevScroll;
                         }
                         
                         // Update progress bar (fractional: done files + in-flight bytes)
