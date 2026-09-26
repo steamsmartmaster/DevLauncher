@@ -1877,8 +1877,8 @@
                         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                         <input type="text" id="searchInput" placeholder="搜索版本..." oninput="filterVersions()">
                     </div>
-                    <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">全部</button>
-                    <button class="filter-btn" data-filter="release" onclick="setFilter('release')">正式版</button>
+                    <button class="filter-btn" data-filter="all" onclick="setFilter('all')">全部</button>
+                    <button class="filter-btn active" data-filter="release" onclick="setFilter('release')">正式版</button>
                     <button class="filter-btn" data-filter="snapshot" onclick="setFilter('snapshot')">快照版</button>
                 </div>
             </div>
@@ -1923,9 +1923,9 @@
                         <!-- Version download with mod loader selector -->
                         <div class="download-tab-content active" id="dlVersions">
                             <div class="download-filter-bar">
-                                <select class="settings-input" id="dlVersionFilter" style="width:120px;" onchange="filterDownloadVersions()">
+                                <select class="settings-input" id="dlVersionFilter" style="width:120px;" onchange="setFilter(this.value)">
                                     <option value="all">全部</option>
-                                    <option value="release">正式版</option>
+                                    <option value="release" selected>正式版</option>
                                     <option value="snapshot">快照版</option>
                                 </select>
                                 <input type="text" class="settings-input" id="dlVersionSearch" placeholder="搜索版本..." style="flex:1;" oninput="filterDownloadVersions()">
@@ -2662,6 +2662,7 @@
             } else {
                 headerActions.style.display = 'none';
             }
+            syncHeaderTags();
         }
 
         function showLoading(listId) {
@@ -2701,6 +2702,16 @@
         }
 
         var needsDownloadGridRender = false;
+        var currentDlTab = 'versions';
+        var dlRenderGen = 0;
+
+        // 头部筛选标签仅在 下载页+版本子tab 显示
+        function syncHeaderTags() {
+            var show = currentPage === 'download' && currentDlTab === 'versions';
+            document.querySelectorAll('.filter-btn').forEach(function(btn) {
+                btn.style.display = show ? '' : 'none';
+            });
+        }
 
         function updateVersionList(versionList) {
             console.log('[JS] updateVersionList, count:', versionList.length);
@@ -2749,6 +2760,8 @@
 
         function renderDownloadGrid() {
             needsDownloadGridRender = false;
+            dlRenderGen++;
+            var gen = dlRenderGen;
             var downloadGrid = document.getElementById('downloadGrid');
             var typeFilter = document.getElementById('dlVersionFilter').value;
             var search = document.getElementById('dlVersionSearch').value.toLowerCase();
@@ -2765,19 +2778,30 @@
                 return true;
             });
             
+            downloadGrid.innerHTML = '';
             if (notInstalled.length === 0) {
                 downloadGrid.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px;">没有匹配的版本</div>';
                 return;
             }
             
-            var fragment = document.createDocumentFragment();
-            notInstalled.forEach(function(v) {
-                var dlCard = createVersionCard(v, v.installed);
-                dlCard.onclick = function() { installVersionWithLoader(v.id); };
-                fragment.appendChild(dlCard);
-            });
-            downloadGrid.innerHTML = '';
-            downloadGrid.appendChild(fragment);
+            // 分片渲染: 首批同步渲染, 余下通过 requestAnimationFrame 追加, 避免长列表卡顿
+            var BATCH = 40;
+            var index = 0;
+            function appendBatch() {
+                if (gen !== dlRenderGen) return;
+                var end = Math.min(index + BATCH, notInstalled.length);
+                for (; index < end; index++) {
+                    (function(v) {
+                        var dlCard = createVersionCard(v, v.installed);
+                        dlCard.onclick = function() { installVersionWithLoader(v.id); };
+                        downloadGrid.appendChild(dlCard);
+                    })(notInstalled[index]);
+                }
+                if (index < notInstalled.length) {
+                    requestAnimationFrame(appendBatch);
+                }
+            }
+            appendBatch();
         }
 
         function populateGameVersionDropdowns() {
@@ -2805,12 +2829,42 @@
             });
             gameVersions.sort().reverse();
 
-            // Populate version list selects (dlVersionFilter, modGameVersion, modpackGameVersion)
-            var selectIds = ['dlVersionFilter', 'modGameVersion', 'modpackGameVersion'];
+            // 统一排序: 正式版 → 愚人节(-04-01) → 其他, 组内保持原降序; 选中版本置顶
+            var rankByVer = {};
+            versions.forEach(function(v) {
+                var m = v.id.match(/^(\d+\.\d+(?:\.\d+)?)/);
+                var ver = m ? m[1] : v.id;
+                var r = versionRank(v);
+                if (rankByVer[ver] === undefined || r < rankByVer[ver]) rankByVer[ver] = r;
+            });
+            var selBase = '';
+            if (selectedVersion) {
+                var sm = selectedVersion.match(/^(\d+\.\d+(?:\.\d+)?)/);
+                selBase = sm ? sm[1] : selectedVersion;
+            }
+            gameVersions.sort(function(a, b) {
+                if (a === b) return 0;
+                if (selBase && a === selBase) return -1;
+                if (selBase && b === selBase) return 1;
+                var ra = rankByVer[a] === undefined ? 0 : rankByVer[a];
+                var rb = rankByVer[b] === undefined ? 0 : rankByVer[b];
+                return ra - rb;
+            });
+
+            function applyValue(sel, value) {
+                if (!value) return;
+                for (var i = 0; i < sel.options.length; i++) {
+                    if (sel.options[i].value === value) { sel.value = value; return; }
+                }
+            }
+
+            // Populate version list selects (modGameVersion, modpackGameVersion)
+            var selectIds = ['modGameVersion', 'modpackGameVersion'];
             selectIds.forEach(function(id) {
                 var sel = document.getElementById(id);
                 if (!sel) return;
                 var firstOpt = sel.options[0];
+                var prevValue = sel.value;
                 sel.innerHTML = '';
                 sel.appendChild(firstOpt);
                 gameVersions.forEach(function(ver) {
@@ -2819,21 +2873,30 @@
                     opt.textContent = ver;
                     sel.appendChild(opt);
                 });
+                applyValue(sel, prevValue);
             });
 
             // Populate picker dropdown (always use common versions)
             var pickerSel = document.getElementById('pickerGameVersion');
             if (pickerSel) {
-                var firstOpt = pickerSel.options[0];
+                var pickerFirstOpt = pickerSel.options[0];
+                var pickerPrevValue = pickerSel.value;
                 pickerSel.innerHTML = '';
-                pickerSel.appendChild(firstOpt);
+                pickerSel.appendChild(pickerFirstOpt);
                 gameVersions.forEach(function(ver) {
                     var opt = document.createElement('option');
                     opt.value = ver;
                     opt.textContent = ver;
                     pickerSel.appendChild(opt);
                 });
+                applyValue(pickerSel, pickerPrevValue);
             }
+        }
+
+        function versionRank(v) {
+            if (v.type === 'release') return 0;
+            if ((v.releaseTime || '').indexOf('-04-01') !== -1) return 1;
+            return 2;
         }
 
         function filterDownloadVersions() {
@@ -2946,6 +3009,7 @@
                 pythonInterface.getVersionIsolationStatus(versionId);
             }
             
+            populateGameVersionDropdowns();
             updateVersionGrid();
         }
 
@@ -3462,6 +3526,8 @@
                 tabLoadedFlags[tab] = true;
                 loadTrendingContent(tab);
             }
+            currentDlTab = tab;
+            syncHeaderTags();
         }
 
         function loadTrendingContent(tabType) {
@@ -5244,6 +5310,7 @@
             console.log('[JS] DOM ready, initializing bridge...');
             // Hide search/filter on initial versions page
             document.querySelector('.header-actions').style.display = 'none';
+            syncHeaderTags();
             initBridge();
             
             // Initialize custom dropdowns

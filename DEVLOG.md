@@ -204,3 +204,18 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - **转圈修复**：新增共享 `dlFileItemHtml(f)`——downloading 图标内联 `animation-delay:-(Date.now()%800/1000)s` 把旋转相位锚定墙钟，innerHTML 整体重建不再重启动画；内置下载面板（`updateLaunchButton` installing 分支）与 mini 列表共用，done ✓/error ✗ 行为不变
 
 **验证**：红→绿 TDD —— `test_collapse_spin.js` 先 RED（`dlFileItemHtml` not found）；绿：delay ∈ [0,0.8)、收起门控/幂等切换、mini 进度 43→86→100% 无回退、mini 列表无"还有"行；`test_toggle_local.js` PASS；套件 9/9 ALL PASS；`py_compile`；提取 `<script>` `node --check`；grep 确认细条引用 0 残留
+
+### 下载→版本页 4 项需求（2026-09-26）
+
+**需求**：①进入"下载→版本"卡一下；②模组/整合包/选择器三个版本下拉统一排序（正式版 → 愚人节 → 其他，选中置顶，组内保持降序）；③类型筛选下拉默认"正式版"；④头部 全部/正式版/快照版 筛选标签仅在 下载页+版本子tab 显示（搜索框保留）。
+
+**实现**（全部在 `ui/index.html`）：
+- **防卡顿**：`renderDownloadGrid` 改分片渲染——顶部 `dlRenderGen++` 记代次，同步渲染首批 40 张，余下通过 `requestAnimationFrame(appendBatch)` 分批追加；每批先判 `gen !== dlRenderGen` 直接放弃（新渲染/空结果清场后旧批次不再续写）；卡片 onclick 用 IIFE 闭包绑定 id；空结果先 `innerHTML=''` 再写提示文案（同样先记代次）
+- **统一排序**：新增 `versionRank(v)`（release→0；`releaseTime` 含 `-04-01`→1（愚人节，日期两种格式均容）；其他→2）；`populateGameVersionDropdowns` 内按 base 版本聚合 `rankByVer`（同 base 取贡献版本的最小秩，未见的 commonVersions → 0），在原 `sort().reverse()` 降序基础上做稳定秩排序，`selectedVersion` 的 base 置顶（正则同 base 提取，无数字前缀时用全 id）；`commonVersions` 列表与降序行为原样保留
+- **默认正式版**：`selectIds` 移除 `dlVersionFilter`（类型下拉完全不再被 populate 触碰，选中值天然保全）；HTML `<option value="release" selected>`；`onchange` 从 `filterDownloadVersions()` 改为 `setFilter(this.value)`（标签/下拉/网格单一来源同步）；`currentFilter` 仍初始 `'all'`（否则已安装页的快照/自定义版本会被藏掉且标签不可见），头部标签 `active` 从"全部"移到"正式版"以反映下载页默认筛选
+- **标签显隐**：新增 `var currentDlTab = 'versions'` + `syncHeaderTags()`（`currentPage==='download' && currentDlTab==='versions'` 时显示 `.filter-btn`，否则隐藏，不碰搜索框），在 `navigateTo` 末尾、`switchDownloadTab`（同时写 `currentDlTab = tab`）、DOMContentLoaded 三处调用
+- **选中联动**：`selectVersion` 末尾补 `populateGameVersionDropdowns()`（选中版本置顶随选择更新）；modGameVersion/modpackGameVersion/pickerGameVersion 重建时捕获并恢复选中值（`applyValue`）
+
+**验证**：红→绿 TDD —— 新建仓库内 `tests/test_version_filters.js`（61 断言：静态检查、versionRank 分级、排序单调/位置/末尾 `25w14craftmine,b1.7.3,25w18a`、选中置顶、selectVersion 重填充、dlVersionFilter 保全、分片渲染/代次守卫/空结果清场/类型筛选、标签显隐 5 场景、setFilter 回归）；RED 25/28 FAIL → 实现后 **61/0 ALL PASS**；期间修复 3 处仅测试自身的桩错误（`env.state` 挂接、gen 守卫用错 env 的 grid、`'none;'.slice` 削弱断言）；`py_compile`；提取 `<script>` `node --check`；`git diff` 逐块复核（曾误删 `commonVersions` 块，已还原）
+
+**注意（测试资产丢失）**：`%TEMP%\opencode` 历史套件（`test_import_flows.py` 9 用例、`test_toggle_local.js`、`test_collapse_spin.js` 等）已被系统第三次清理删除；本次新测试落在仓库 `tests/` 内不再受影响；旧套件未重建（与本任务无关，需要时按 DEVLOG 重建记录恢复）
