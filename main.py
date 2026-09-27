@@ -103,6 +103,7 @@ class LauncherBridge(QObject):
     worldsLoaded = pyqtSignal(str)
     resourcepacksLoaded = pyqtSignal(str)
     versionIsolationStatus = pyqtSignal(str)
+    versionFoldersLoaded = pyqtSignal(str)
     loginComplete = pyqtSignal(str)
     progressUpdate = pyqtSignal(float, str)
     gameLaunched = pyqtSignal()
@@ -1558,6 +1559,35 @@ class LauncherBridge(QObject):
         except Exception as e:
             logger.error(f"获取版本隔离状态失败: {e}", exc_info=True)
 
+    @pyqtSlot(str)
+    def getVersionFolders(self, version_id: str):
+        """列出版本游戏目录的子文件夹 (识别为中文名)"""
+        try:
+            data = self.versions.list_version_folders(version_id)
+            logger.info(f"版本文件目录: {version_id} -> {data['path']} ({len(data['folders'])} 个)")
+            self.versionFoldersLoaded.emit(json.dumps(data, ensure_ascii=False))
+        except Exception as e:
+            logger.error(f"获取版本文件目录失败: {e}", exc_info=True)
+            self.errorOccurred.emit(f"获取版本文件目录失败: {e}")
+
+    @pyqtSlot(str, str)
+    def openVersionFolder(self, version_id: str, subfolder: str):
+        """用系统资源管理器打开版本游戏目录或其子目录 (空串 = 根目录)"""
+        try:
+            target = self.versions.resolve_folder(version_id, subfolder)
+            if not target:
+                self.errorOccurred.emit(f"文件夹不存在: {subfolder or version_id}")
+                return
+            from PyQt6.QtGui import QDesktopServices
+            ok = QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+            if ok:
+                logger.info(f"打开文件夹: {target}")
+            else:
+                self.errorOccurred.emit(f"打开文件夹失败: {target}")
+        except Exception as e:
+            logger.error(f"打开文件夹失败: {e}", exc_info=True)
+            self.errorOccurred.emit(f"打开文件夹失败: {e}")
+
     def refresh_versions(self):
         """Refresh and send version list to JS"""
         installed = self.versions.get_installed_versions()
@@ -1914,6 +1944,7 @@ class MainWindow(QMainWindow):
         self.bridge.worldsLoaded.connect(self._on_worlds_loaded)
         self.bridge.resourcepacksLoaded.connect(self._on_resourcepacks_loaded)
         self.bridge.versionIsolationStatus.connect(self._on_version_isolation_status)
+        self.bridge.versionFoldersLoaded.connect(self._on_version_folders)
         self.bridge.loginComplete.connect(self._on_login_complete)
         self.bridge.loginStarted.connect(self._on_login_started)
         self.bridge.progressUpdate.connect(self._on_progress_update)
@@ -1964,6 +1995,12 @@ class MainWindow(QMainWindow):
         logger.info(f"信号: versionIsolationStatus - {status_json[:100]}")
         self.web_view.page().runJavaScript(
             f"updateVersionIsolationStatus({status_json})"
+        )
+
+    def _on_version_folders(self, payload: str):
+        logger.info(f"信号: versionFoldersLoaded, 长度: {len(payload)}")
+        self.web_view.page().runJavaScript(
+            f"renderVersionFolders({payload})"
         )
 
     def _on_login_complete(self, login_json: str):

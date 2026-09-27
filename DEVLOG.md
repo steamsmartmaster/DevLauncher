@@ -231,3 +231,14 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - `ui/index.html` `displaySearchResults`：优先 `results.tab` 路由到 `tabType + 'Results'`（无论该页签当前是否可见，隐藏页签照常写入，切回即见内容）；无 `tab` 字段时回退旧的活动页签行为（向后兼容）
 
 **验证**：红→绿 TDD —— 新建 `tests/test_tab_result_routing.js`（11 断言：结果写回请求页签且不污染当前页签、空结果同路由、无 tab 回退兼容、两侧静态检查 `results.tab` 与 2 处 `"tab": content_type`）+ 共享抽取器 `tests/extract_func.js`；RED 2/9 FAIL（精确复现占位符不消失/串容器）→ 实现后 **11/0 ALL PASS**；回归 `test_version_filters.js` 61/0；`py_compile`；提取 `<script>` `node --check`；`git diff` 复核（改动仅 3 处：2 个载荷字段 + 路由逻辑）
+
+### 新增：版本管理页"文件目录"（2026-09-27）
+
+**需求**（用户提出 + 两轮确认）：版本管理页新增"文件目录"区块——自动识别该版本游戏目录下的所有子文件夹，识别得出的（mods、saves 等）显示中文名（模组文件夹、世界文件夹…），识别不出的（模组特殊文件夹）显示原名，点击用资源管理器打开；扫描基准=**跟随版本隔离的游戏目录**（隔离开→`versions/<id>/`，关→`.minecraft` 根）。
+
+**实现**：
+- `launcher_core/versions.py`：模块级 `FOLDER_LABELS` 映射（键序即排序序：mods→模组、saves→世界、config→配置、resourcepacks→资源包、shaderpacks→光影、screenshots→截图、crash-reports→崩溃报告、logs→日志）；`get_game_dir(version_id)`（隔离判定复用 `is_version_isolated`，未知版本回退根目录）；`list_version_folders`（列子目录、映射命名、识别项按映射序在前 + 未识别字母序在后，附 `path`）；`resolve_folder`（打开前校验：空串=根、拒绝绝对路径、`resolve()` 后必须 `is_relative_to` 游戏目录、必须存在且是目录，否则 None——防路径穿越）
+- `main.py`：`versionFoldersLoaded` 信号 + `getVersionFolders(version_id)` 槽（emit `ensure_ascii=False` JSON）+ `openVersionFolder(version_id, subfolder)` 槽（`QDesktopServices.openUrl(QUrl.fromLocalFile(...))`，失败走 `errorOccurred` toast）；`_on_version_folders` 回调 `renderVersionFolders(...)`，在连接区注册
+- `ui/index.html`：版本管理页隔离开关下新增 `.version-folders-section`（CSS 一并新增）——头部"文件目录"+ 实际路径小字（`versionFoldersPath`）+"打开版本文件夹"按钮（`openVersionFolder('')`），列表 `versionFoldersList`；JS `renderVersionFolders`（按载荷顺序建行，`recognized` 类区分，闭包点击 `openVersionFolder(f.name)`，空列表提示"此文件夹内没有子文件夹"）、`loadVersionFolders`、`openVersionFolder`；`openVersionManager` 与 `toggleVersionIsolation`（隔离切换后目录会变）均刷新列表
+
+**验证**：红→绿 TDD —— `tests/test_version_folders.py` **RED 12/12 FAIL**（AttributeError 缺方法；修掉一处测试桩 `mkdir` 缺 `exist_ok` 的自伤）→ 实现后 **12/12 PASS**；`tests/test_version_folders_ui.js` **RED 0/9**（缺函数/容器/槽/接线）→ **22/22 PASS**（渲染识别与未识别行、顺序保持、点击传参、空列表、刷新传 selectedVersion、两侧静态接线）；回归 `test_version_filters.js` 61/0 + `test_tab_result_routing.js` 11/0；`py_compile`；提取 `<script>` `node --check`；`git diff` 复核（3 文件 235 行全为新增）

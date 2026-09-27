@@ -10,6 +10,18 @@ import minecraft_launcher_lib
 
 logger = logging.getLogger("DevLauncher")
 
+# 版本管理页"文件目录"识别映射: 键序即列表排序序; 未识别的文件夹显示原名
+FOLDER_LABELS = {
+    "mods": "模组文件夹",
+    "saves": "世界文件夹",
+    "config": "配置文件夹",
+    "resourcepacks": "资源包文件夹",
+    "shaderpacks": "光影文件夹",
+    "screenshots": "截图文件夹",
+    "crash-reports": "崩溃报告文件夹",
+    "logs": "日志文件夹",
+}
+
 
 class VersionSetting:
     """Per-version game settings"""
@@ -325,6 +337,63 @@ class VersionManager:
         """Check if a version has isolation enabled"""
         setting = self.get_version_setting(version_id)
         return setting.get("isolation", False)
+
+    def get_game_dir(self, version_id: str) -> Path:
+        """游戏目录: 隔离开启 -> versions/<id>/, 否则 -> .minecraft 根目录"""
+        if self.is_version_isolated(version_id):
+            version_path = self.get_version_path(version_id)
+            if version_path:
+                return version_path
+        return Path(self.minecraft_dir)
+
+    def list_version_folders(self, version_id: str) -> dict:
+        """列出版本游戏目录下的子文件夹 (识别映射中文名, 未识别显示原名)"""
+        game_dir = self.get_game_dir(version_id)
+        folders = []
+        if game_dir.exists():
+            for entry in game_dir.iterdir():
+                if not entry.is_dir():
+                    continue
+                label = FOLDER_LABELS.get(entry.name)
+                folders.append({
+                    "name": entry.name,
+                    "label": label if label is not None else entry.name,
+                    "recognized": label is not None,
+                })
+        label_order = list(FOLDER_LABELS)
+        recognized = sorted(
+            (f for f in folders if f["recognized"]),
+            key=lambda f: label_order.index(f["name"]),
+        )
+        unrecognized = sorted(
+            (f for f in folders if not f["recognized"]),
+            key=lambda f: f["name"].lower(),
+        )
+        return {
+            "version_id": version_id,
+            "path": str(game_dir),
+            "folders": recognized + unrecognized,
+        }
+
+    def resolve_folder(self, version_id: str, subfolder: str) -> Optional[Path]:
+        """校验并返回要打开的目录; 不存在/非目录/越出游戏目录/绝对路径 -> None"""
+        game_dir = self.get_game_dir(version_id)
+        if not game_dir.exists():
+            return None
+        if not subfolder:
+            return game_dir
+        rel = Path(subfolder)
+        if rel.is_absolute():
+            return None
+        target = game_dir / rel
+        try:
+            if not target.resolve().is_relative_to(game_dir.resolve()):
+                return None
+        except OSError:
+            return None
+        if not target.is_dir():
+            return None
+        return target
 
     def get_isolated_path(self, version_id: str, subdir: str) -> Optional[Path]:
         """Get the isolated path for a version's subdirectory"""
