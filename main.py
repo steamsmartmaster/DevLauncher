@@ -687,7 +687,8 @@ class LauncherBridge(QObject):
                     "hits": formatted,
                     "total_hits": results.get("total_hits", 0),
                     "isTrending": True,
-                    "source": source
+                    "source": source,
+                    "tab": content_type
                 })
                 logger.info(f"热门{content_type} ({source}): {len(formatted)} 个")
                 self.searchResults.emit(result_json)
@@ -1010,7 +1011,8 @@ class LauncherBridge(QObject):
                 result_json = json.dumps({
                     "hits": formatted,
                     "total_hits": results.get("total_hits", 0),
-                    "source": source
+                    "source": source,
+                    "tab": content_type
                 })
                 logger.info(f"搜索结果 ({source}): {len(formatted)} 个")
                 self.searchResults.emit(result_json)

@@ -3576,10 +3576,13 @@
             var hits = results.hits || [];
             var isTrending = results.isTrending || false;
             
-            var activeTab = document.querySelector('.download-tab.active');
-            if (!activeTab) return;
-            
-            var tabType = activeTab.dataset.dlTab;
+            // 按请求时的页签路由 (results.tab), 避免切换页签后结果写错容器; 无 tab 时回退活动页签
+            var tabType = results.tab;
+            if (!tabType) {
+                var activeTab = document.querySelector('.download-tab.active');
+                if (!activeTab) return;
+                tabType = activeTab.dataset.dlTab;
+            }
             var resultsContainer = document.getElementById(tabType + 'Results');
             if (!resultsContainer) return;
             

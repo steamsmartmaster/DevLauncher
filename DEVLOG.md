@@ -219,3 +219,15 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 **验证**：红→绿 TDD —— 新建仓库内 `tests/test_version_filters.js`（61 断言：静态检查、versionRank 分级、排序单调/位置/末尾 `25w14craftmine,b1.7.3,25w18a`、选中置顶、selectVersion 重填充、dlVersionFilter 保全、分片渲染/代次守卫/空结果清场/类型筛选、标签显隐 5 场景、setFilter 回归）；RED 25/28 FAIL → 实现后 **61/0 ALL PASS**；期间修复 3 处仅测试自身的桩错误（`env.state` 挂接、gen 守卫用错 env 的 grid、`'none;'.slice` 削弱断言）；`py_compile`；提取 `<script>` `node --check`；`git diff` 逐块复核（曾误删 `commonVersions` 块，已还原）
 
 **注意（测试资产丢失）**：`%TEMP%\opencode` 历史套件（`test_import_flows.py` 9 用例、`test_toggle_local.js`、`test_collapse_spin.js` 等）已被系统第三次清理删除；本次新测试落在仓库 `tests/` 内不再受影响；旧套件未重建（与本任务无关，需要时按 DEVLOG 重建记录恢复）
+
+### 修复：搜索/热门结果串页签（2026-09-27）
+
+**现象**（用户提供日志）：请求在途时切换下载子页签，先前页签永远显示"正在从Modrinth加载模组列表..."，内容或写错容器（例：选模组后未出结果就切整合包 → 模组不显示）。
+
+**根因**：`displaySearchResults`（`ui/index.html`）按**结果到达时**的 `.download-tab.active` 决定写入哪个容器；Python 两个结果载荷（`loadTrendingContent` / `searchContentFiltered` 的 `result_json`）不含 `content_type`/页签，JS 无从得知结果属于哪个请求——请求时的页签信息在传输中丢失。
+
+**实现**：
+- `main.py`：两处 `result_json` 增加 `"tab": content_type`（trending L687 附近、search L1011 附近）
+- `ui/index.html` `displaySearchResults`：优先 `results.tab` 路由到 `tabType + 'Results'`（无论该页签当前是否可见，隐藏页签照常写入，切回即见内容）；无 `tab` 字段时回退旧的活动页签行为（向后兼容）
+
+**验证**：红→绿 TDD —— 新建 `tests/test_tab_result_routing.js`（11 断言：结果写回请求页签且不污染当前页签、空结果同路由、无 tab 回退兼容、两侧静态检查 `results.tab` 与 2 处 `"tab": content_type`）+ 共享抽取器 `tests/extract_func.js`；RED 2/9 FAIL（精确复现占位符不消失/串容器）→ 实现后 **11/0 ALL PASS**；回归 `test_version_filters.js` 61/0；`py_compile`；提取 `<script>` `node --check`；`git diff` 复核（改动仅 3 处：2 个载荷字段 + 路由逻辑）
