@@ -4563,15 +4563,18 @@
             return versionId;
         }
 
+        // 加载器互斥矩阵 (按 HMCL InstallerItemGroup 规则, InstallerItem.java:172-178):
+        // forge/fabric/quilt/neoforge 两两互斥; optifine 与 fabric/quilt/neoforge 互斥但与 forge 兼容
         var LOADER_INCOMPATIBLE = {
-            forge: ['neoforge'],
-            neoforge: ['forge'],
-            fabric: ['quilt'],
-            quilt: ['fabric'],
+            forge: ['neoforge', 'fabric', 'quilt'],
+            fabric: ['forge', 'neoforge', 'quilt', 'optifine'],
+            quilt: ['forge', 'neoforge', 'fabric', 'optifine'],
+            neoforge: ['forge', 'fabric', 'quilt', 'optifine'],
             optifine: ['fabric', 'quilt', 'neoforge']
         };
 
         function markIncompatibleLoaders(installedTypes) {
+            var displayNames = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt', optifine: 'OptiFine' };
             document.querySelectorAll('#modLoaderModal .mod-loader-btn').forEach(function(btn) {
                 var loader = btn.dataset.loader;
                 if (!loader || loader === 'none') return;
@@ -4585,7 +4588,7 @@
                         btn.setAttribute('data-tooltip', '已安装');
                     } else {
                         var conflictName = installedTypes.filter(function(t) { return incompatible.indexOf(t) !== -1; })[0];
-                        btn.setAttribute('data-tooltip', '与 ' + conflictName.charAt(0).toUpperCase() + conflictName.slice(1) + ' 不兼容');
+                        btn.setAttribute('data-tooltip', '与 ' + (displayNames[conflictName] || conflictName) + ' 不兼容');
                     }
                 } else {
                     btn.classList.remove('incompatible');

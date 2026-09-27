@@ -151,3 +151,14 @@
 - [ ] 切换版本隔离开关后，文件目录列表自动刷新（反映隔离目录的创建/删除）
 - [ ] 空目录显示"此文件夹内没有子文件夹"
 - [ ] 打开不存在/非法的子目录有错误提示，不崩溃（路径穿越被拒绝）
+
+## 19. 加载器兼容矩阵（按 HMCL 规则，2026-09-27 新增）
+- [ ] 装了 Forge 后：Fabric/Quilt/NeoForge 显示"与 Forge 不兼容"不可点，**OptiFine 仍可安装**（HMCL: 二者兼容）
+- [ ] 装了 Fabric 后：Forge/NeoForge/Quilt/OptiFine 全部"与 Fabric 不兼容"，Fabric 显示已安装
+- [ ] 装了 NeoForge 后：Forge/Fabric/Quilt/OptiFine 全部不可点
+- [ ] 装了 OptiFine 后：**Forge 仍可安装**，Fabric/Quilt/NeoForge 不可点
+- [ ] 装了 Quilt 后：Forge/Fabric/NeoForge/OptiFine 全部不可点
+- [ ] 未装任何加载器时五个加载器都可点
+- [ ] 冲突提示名称大小写正确：与 NeoForge / 与 OptiFine（不是 Neoforge/Optifine）
+- [ ] 安装弹窗与版本管理→模组加载器页两处行为一致
+- [ ] 已安装的加载器显示"已安装"（优先于不兼容提示）

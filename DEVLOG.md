@@ -242,3 +242,18 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - `ui/index.html`：版本管理页隔离开关下新增 `.version-folders-section`（CSS 一并新增）——头部"文件目录"+ 实际路径小字（`versionFoldersPath`）+"打开版本文件夹"按钮（`openVersionFolder('')`），列表 `versionFoldersList`；JS `renderVersionFolders`（按载荷顺序建行，`recognized` 类区分，闭包点击 `openVersionFolder(f.name)`，空列表提示"此文件夹内没有子文件夹"）、`loadVersionFolders`、`openVersionFolder`；`openVersionManager` 与 `toggleVersionIsolation`（隔离切换后目录会变）均刷新列表
 
 **验证**：红→绿 TDD —— `tests/test_version_folders.py` **RED 12/12 FAIL**（AttributeError 缺方法；修掉一处测试桩 `mkdir` 缺 `exist_ok` 的自伤）→ 实现后 **12/12 PASS**；`tests/test_version_folders_ui.js` **RED 0/9**（缺函数/容器/槽/接线）→ **22/22 PASS**（渲染识别与未识别行、顺序保持、点击传参、空列表、刷新传 selectedVersion、两侧静态接线）；回归 `test_version_filters.js` 61/0 + `test_tab_result_routing.js` 11/0；`py_compile`；提取 `<script>` `node --check`；`git diff` 复核（3 文件 235 行全为新增）
+
+### 修复：加载器兼容矩阵按 HMCL 规则重写（2026-09-27）
+
+**需求**（用户确认）：模组加载器的兼容关系不正确，按 HMCL 的规则实现（截图取自 HMCL 的模组加载器选择界面）。
+
+**规则提取**：拉取 HMCL 源码，`HMCL/src/main/java/org/jackhuang/hmcl/ui/InstallerItem.java` `InstallerItemGroup`（L172-178）为权威矩阵——`mutualIncompatible(forge, fabric, quilt, neoforge, ...)` 四者两两互斥；`addIncompatibles(optiFine, fabric, quilt, neoforge, ...)` OptiFine 与三者互斥但与 Forge 兼容；Fabric API/Quilt API 各自与对方生态加载器互斥、与本族加载器兼容（本仓库无 fabricapi 卡片，暂不适用）；已安装状态优先于不兼容状态。
+
+**BUG**：旧 `LOADER_INCOMPATIBLE` 只记了一半配对（`forge:['neoforge']`、`fabric:['quilt']`…），且 optifine 单向声明破坏对称——装了 Forge 后 Fabric/Quilt 仍可点安装，装了 Fabric 后 Forge/NeoForge/OptiFine 仍可装，装了 OptiFine 后 Fabric/Quilt/NeoForge 可装；另外 `markIncompatibleLoaders` 用朴素首字母大写生成冲突名（"Neoforge"/"Optifine" 错拼）。
+
+**实现**（`ui/index.html`）：
+- `LOADER_INCOMPATIBLE` 按 HMCL 重写为对称矩阵：forge↔{fabric,quilt,neoforge}；fabric/quilt/neoforge 两两互斥 + 各自↔optifine；optifine↔{fabric,quilt,neoforge}（与 forge 兼容），注释标注来源
+- `markIncompatibleLoaders` 冲突名改用 `displayNames` 映射（NeoForge/OptiFine 正确大小写），与安装行 `names` 映射一致
+- 安装弹窗按钮与模组加载器页安装行共用同一矩阵，两处行为一致
+
+**验证**：红→绿 TDD —— 新建 `tests/test_loader_compatibility.js`（82 断言：矩阵逐项对照 HMCL、全对称性、弹窗三场景行为、加载器页安装行 HTML、静态接线）；**RED 61/21**（失败全为缺配对/对称破坏/漏标灰）→ 修矩阵 + 冲突名映射 → **82/0 ALL PASS**；回归 `test_tab_result_routing` 11/0、`test_version_filters` 61/0、`test_version_folders_ui` 22/0、pytest 12/12；`py_compile`；提取 `<script>` `node --check`；`git diff` 复核（仅 index.html 两处 + 新测试文件）
