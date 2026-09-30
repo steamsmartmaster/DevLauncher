@@ -257,3 +257,27 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - 安装弹窗按钮与模组加载器页安装行共用同一矩阵，两处行为一致
 
 **验证**：红→绿 TDD —— 新建 `tests/test_loader_compatibility.js`（82 断言：矩阵逐项对照 HMCL、全对称性、弹窗三场景行为、加载器页安装行 HTML、静态接线）；**RED 61/21**（失败全为缺配对/对称破坏/漏标灰）→ 修矩阵 + 冲突名映射 → **82/0 ALL PASS**；回归 `test_tab_result_routing` 11/0、`test_version_filters` 61/0、`test_version_folders_ui` 22/0、pytest 12/12；`py_compile`；提取 `<script>` `node --check`；`git diff` 复核（仅 index.html 两处 + 新测试文件）
+
+### 功能：多账号管理（2026-09-27）
+
+**需求**（用户确认）：多账号管理——离线与 Microsoft 账号并存，支持列表/切换/删除，按账号持久化令牌；单点登录的 `auth.json` 升级为多账号存储并自动迁移。
+
+**实现**：
+- `launcher_core/accounts.py`（新增）：`AccountStore` 持久化到 `~/.mc-launcher/accounts.json`（原子写 tmp+replace、utf-8、`ensure_ascii=False`）；`list()` 摘要 `{id,type,name,uuid,lastUsed,isCurrent}` 按 lastUsed 降序且**绝不含 data/令牌**；`add` 校验 type∈{offline,microsoft} 否则 ValueError（校验先于任何落盘）、离线按 name/微软按 uuid 去重；`switch/remove/update_data/deselect`；`migrate_legacy` 读旧 auth.json 导入首个账号并保留原文件（损坏 JSON 返回 False 不崩）；`_load` 剔除非 dict/缺键/非数值 lastUsed 条目并 WARNING；`_save` 失败记日志后**上抛**（不吞成假成功）
+- `launcher_core/auth.py`：`AuthManager` 改造为 `store` 注入（构造即 migrate）；`complete_login/offline_login` → `store.add`；`get_login_data`→`store.current()`；**登出=取消选中（deselect）不删账号**（删除是账户页独立操作）；`refresh_login` 未登录 → RuntimeError、mll 异常记日志后 re-raise；`offline_login("")` → ValueError；auth.json 写入逻辑全删
+- `main.py`：`accountsLoaded` 信号 + `getAccounts/switchAccount/removeAccount` 槽（payload 构建与 emit 全在 try 内，异常 → errorOccurred）；`checkLoginStatus` 抽出 `_emit_login_status(silent=False)` 供复用，无账号时 emit `{loggedOut:true}`；**切号/删除走 `silent=True`** 防止触发欢迎 toast 与跳页；`logout` 补 emit 刷新列表 isCurrent
+- `ui/index.html`：账户页重构为卡片列表（首字母头像、离线/Microsoft 徽章、当前 ✓ 白描边、整卡点击切换、悬停 🗑 + confirm 二次确认、空态、底部复用离线表单+微软按钮）；`updateLoginStatus` 增 `loggedOut` 分支（登录态正确复位，修"欢迎, 未登录!"误报）与 `silent` 分支；登录成功/离线登录后 `getAccounts()` 刷新；`accountsLoaded → _on_accounts_loaded → renderAccountList` 按 versionsLoaded 同款接线；`escapeAttr` 属性上下文转义（引号注入防护，账号/插件页共用）
+
+**验证**：红→绿 TDD —— `tests/test_accounts.py` **37 用例**（RED 模块缺失 → GREEN；含类型校验/损坏文件/迁移/登出回退/refresh 契约/落盘失败上抛等审查补测）；`tests/test_account_ui.js` **122 断言**（RED 38 FAIL → 修 silent/缓存/冗余拉取后 GREEN → 审查修复轮 16 FAIL → 118 → escapeAttr 3 FAIL → 122）；全套回归 pytest **97**、`test_version_filters` 61/0、`test_tab_result_routing` 11/0、`test_version_folders_ui` 22/0、`test_loader_compatibility` 82/0、`test_plugins_ui` 191/0；`py_compile`；提取 `<script>` `node --check`；启动冒烟 15s 存活；`git diff` 复核 index.html 删除行仅 12 行且全为计划内（accountPage 旧结构+标题映射）
+
+### 功能：插件系统与插件页（2026-09-27）
+
+**需求**（用户确认）：真实扩展系统——Python 插件包（manifest + plugin.py + 宿主 API），本地 `plugins/` 目录扫描，侧栏新增第 8 个"插件"页签，列表→详情两级页面（基本信息/设置表单/自定义内容区/操作按钮）。
+
+**实现**：
+- `launcher_core/plugins.py`（新增）：`PluginManager` 扫描 `plugins/*/manifest.json`（坏 manifest/恶意 id `^[A-Za-z0-9._-]+$` 白名单/重复 id/穿越 junction 一律拒收+WARNING 不崩）；摘要 `{id,name,version,author,icon,description,status,errorMsg,hasSettings,hasContent,dir}` 按名排序；`enabled.json` 启停持久化（缺失=全启用、新插件默认启用）；`load_all` 单插件异常隔离成 error 状态；`detail` 返回 settings（schema+value，非法元素与坏 key 过滤）与 contentHtml（仅启用且加载成功）；`set_enabled(True)` 立即加载；`save_config` 类型校验（text/toggle/number、拒 bool 与不可序列化值）返回 `{success,error}`；`uninstall` 三重防线（格式白名单+命中已扫描+resolve 父目录）先释放实例再 rmtree；`folder_of` 同防；`PluginContext`（register_content/get_config/set_config/专属 logger）；模块经 `importlib` 独立加载（exec 失败/禁用/卸载不留 sys.modules 残留）
+- `plugins/hello-sample/`：manifest（3 个设置项）+ plugin.py 示范（`html.escape` 转义、docstring）
+- `main.py`：`pluginsLoaded/pluginDetailLoaded` 信号 + 7 槽（getPlugins/getPluginDetail/setPluginEnabled/savePluginConfig/reloadPlugins/openPluginFolder/uninstallPlugin），全槽 try 兜底 → errorOccurred（含 savePluginConfig 后半段与 openPluginFolder，防 Qt 槽异常逃逸致进程 abort）；启动 `QTimer.singleShot(0)` 延后 `load_all()` 且 try 包裹；`_on_plugins_loaded/_on_plugin_detail_loaded` → runJavaScript 字面量注入
+- `ui/index.html`：侧栏第 8 项（puzzle SVG、data-page="plugins"、tooltip）+ 标题映射；`#pluginsPage` 双视图（列表/详情）；列表卡片（图标/名称/`v1.0.0 · 作者`/启用·禁用·错误三色徽章/简介两行截断/errorMsg title 悬浮/空态）；详情（返回按钮、基本信息含目录、启停/打开文件夹/重新加载/卸载 confirm、三类型设置表单+保存、`#pluginContent` 注入或占位）；`currentDetailId` 判定（卸载成功回列表、列表不含当前 id 自动回退、详情空 id 提示"插件不存在"、navigateTo 重置子视图）；同 id 重渲染保留未保存表单输入；`escapeAttr` 全属性上下文转义
+
+**验证**：红→绿 TDD —— `tests/test_plugin_manager.py` **48 用例**（RED 模块缺失 → 25 → 审查修复 8 项 33 → 质量修复 13 项 46 → S1/dir 48；junction 用例 `mklink /J` 真实生效、B1 源码级 reload 钉死、B6 escape）；`tests/test_plugins_ui.js` **191 断言**（RED Task6 静态 31 → Task7 55 FAIL → harness 修桩 144 → 合并修复轮 29 FAIL → 191）；全套回归 pytest 97、JS 6 套 61/11/22/82/122/191 全 0 FAIL；`py_compile`；提取 `<script>` `node --check`；启动冒烟 15s 存活；两轮规格+质量审查（含 S1 引号注入、S2 槽异常逃逸、卸载回列表等必修项）闭环

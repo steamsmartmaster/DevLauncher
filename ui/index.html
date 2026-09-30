@@ -482,6 +482,375 @@
             background: #e5e5e5;
         }
 
+        .account-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .account-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            background: rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            position: relative;
+            transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+        }
+
+        .account-card:hover {
+            background: rgba(255, 255, 255, 0.09);
+            border-color: rgba(255, 255, 255, 0.28);
+        }
+
+        .account-card.is-current {
+            border-color: #ffffff;
+            background: rgba(255, 255, 255, 0.12);
+            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+        }
+
+        .account-card-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .account-card-main {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .account-card-name {
+            color: var(--text-primary, #ffffff);
+            font-size: 13px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .account-card-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.12);
+            color: var(--text-secondary, #cccccc);
+            flex-shrink: 0;
+        }
+
+        .account-card-badge.badge-offline {
+            background: rgba(255, 255, 255, 0.10);
+        }
+
+        .account-card-badge.badge-microsoft {
+            background: rgba(120, 180, 255, 0.18);
+            color: #cfe4ff;
+        }
+
+        .account-card-current {
+            color: #ffffff;
+            font-size: 13px;
+            line-height: 1;
+            margin-left: auto;
+            flex-shrink: 0;
+        }
+
+        .account-card-remove {
+            position: absolute;
+            top: -9px;
+            right: -9px;
+            width: 26px;
+            height: 26px;
+            padding: 0;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            background: #2b2b2b;
+            color: #ff7b7b;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .account-card-remove:hover {
+            background: #ff5f5f;
+            color: #ffffff;
+        }
+
+        .account-card-remove svg {
+            width: 13px;
+            height: 13px;
+        }
+
+        .account-card:hover .account-card-remove {
+            display: flex;
+        }
+
+        .account-empty {
+            text-align: center;
+            color: var(--text-muted, #888888);
+            padding: 26px 10px;
+            font-size: 13px;
+            border: 1px dashed rgba(255, 255, 255, 0.16);
+            border-radius: 12px;
+        }
+
+        /* ===== 插件页 ===== */
+        .plugin-list-view { display: none; }
+        .plugin-list-view.active { display: block; }
+        .plugin-detail-view { display: none; }
+        .plugin-detail-view.active { display: block; }
+
+        .plugin-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 14px;
+        }
+
+        .plugin-card {
+            padding: 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            background: rgba(255, 255, 255, 0.05);
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+        }
+
+        .plugin-card:hover {
+            background: rgba(255, 255, 255, 0.09);
+            border-color: rgba(255, 255, 255, 0.28);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+        }
+
+        .plugin-card-icon {
+            font-size: 30px;
+            line-height: 1;
+            margin-bottom: 10px;
+        }
+
+        .plugin-card-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .plugin-card-name {
+            color: var(--text-primary, #ffffff);
+            font-size: 14px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
+        }
+
+        .plugin-card-meta {
+            color: var(--text-secondary, #aaaaaa);
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        .plugin-card-desc {
+            color: var(--text-muted, #888888);
+            font-size: 12px;
+            line-height: 1.5;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .plugin-card-error {
+            margin-top: 8px;
+            font-size: 11px;
+            color: #ff9d9d;
+            background: rgba(255, 95, 95, 0.12);
+            border: 1px solid rgba(255, 95, 95, 0.3);
+            border-radius: 8px;
+            padding: 5px 8px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .plugin-badge {
+            font-size: 11px;
+            padding: 2px 9px;
+            border-radius: 999px;
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+
+        .plugin-badge.status-enabled {
+            background: rgba(255, 255, 255, 0.16);
+            color: #ffffff;
+        }
+
+        .plugin-badge.status-disabled {
+            background: rgba(255, 255, 255, 0.07);
+            color: #8a8a8a;
+        }
+
+        .plugin-badge.status-error {
+            background: rgba(255, 95, 95, 0.18);
+            color: #ff9d9d;
+        }
+
+        .plugin-badge.status-error::before {
+            content: '';
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #ff5f5f;
+            margin-right: 5px;
+            vertical-align: middle;
+        }
+
+        .plugin-empty {
+            grid-column: 1 / -1;
+            text-align: center;
+            color: var(--text-muted, #888888);
+            padding: 34px 10px;
+            font-size: 13px;
+            border: 1px dashed rgba(255, 255, 255, 0.16);
+            border-radius: 12px;
+        }
+
+        .plugin-detail-head {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-top: 16px;
+            padding: 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .plugin-detail-icon {
+            font-size: 34px;
+            line-height: 1;
+        }
+
+        .plugin-detail-titles { flex: 1; min-width: 0; }
+
+        .plugin-detail-name {
+            color: var(--text-primary, #ffffff);
+            font-size: 17px;
+            font-weight: 600;
+        }
+
+        .plugin-detail-meta {
+            color: var(--text-secondary, #aaaaaa);
+            font-size: 12px;
+            margin-top: 3px;
+        }
+
+        .plugin-detail-error {
+            margin-top: 12px;
+            padding: 9px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 95, 95, 0.35);
+            background: rgba(255, 95, 95, 0.12);
+            color: #ff9d9d;
+            font-size: 12px;
+            word-break: break-all;
+        }
+
+        .plugin-detail-info {
+            display: grid;
+            grid-template-columns: 90px 1fr;
+            gap: 6px 12px;
+            margin: 14px 0 0;
+            font-size: 13px;
+        }
+
+        .plugin-detail-info dt { color: var(--text-muted, #888888); }
+        .plugin-detail-info dd { color: var(--text-primary, #eeeeee); margin: 0; word-break: break-all; }
+
+        .plugin-detail-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 14px;
+        }
+
+        .plugin-settings {
+            margin-top: 16px;
+            padding: 14px 16px 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .plugin-settings-title {
+            color: var(--text-primary, #ffffff);
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .plugin-setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 8px 0;
+            font-size: 13px;
+            color: var(--text-secondary, #cccccc);
+        }
+
+        .plugin-setting-row input[type="text"],
+        .plugin-setting-row input[type="number"] {
+            width: 220px;
+        }
+
+        .plugin-content-box {
+            margin-top: 16px;
+            padding: 16px;
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            background: rgba(255, 255, 255, 0.04);
+            min-height: 60px;
+        }
+
+        .plugin-note {
+            color: var(--text-muted, #888888);
+            font-size: 13px;
+            text-align: center;
+            padding: 18px 8px;
+        }
+
+        .account-add {
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .account-add-title {
+            font-size: 12px;
+            color: var(--text-muted, #888888);
+            margin-bottom: 10px;
+        }
+
         .selected-version {
             background: rgba(255, 255, 255, 0.08);
             border-radius: 12px;
@@ -1944,6 +2313,10 @@
                     <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                     <span class="tooltip">设置</span>
                 </div>
+                <div class="nav-item" data-page="plugins">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;"><path d="M10.5 2.5a2 2 0 0 1 4 0V5h4a2 2 0 0 1 2 2v4h-1.5a2.5 2.5 0 0 0 0 5H21v4a2 2 0 0 1-2 2h-4v-1.5a2.5 2.5 0 0 0-5 0V22H5a2 2 0 0 1-2-2v-4h1.5a2.5 2.5 0 0 0 0-5H3V7a2 2 0 0 1 2-2h5.5z"/></svg>
+                    <span class="tooltip">插件</span>
+                </div>
             </div>
         </div>
 
@@ -2433,7 +2806,7 @@
                 </div>
 
                 <div class="page" id="accountPage">
-                    <div style="max-width: 400px; margin: 0 auto;">
+                    <div style="max-width: 480px; margin: 0 auto;">
                         <div class="account-section">
                             <div class="account-header">
                                 <div class="account-avatar" id="pageAvatar">?</div>
@@ -2442,21 +2815,63 @@
                                     <div class="account-type" id="pageLoginType">-</div>
                                 </div>
                             </div>
-                            <div class="account-actions">
-                                <button class="account-btn login-microsoft" onclick="startLogin()">
-                            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><rect x="2" y="2" width="9" height="9"/><rect x="13" y="2" width="9" height="9"/><rect x="2" y="13" width="9" height="9"/><rect x="13" y="13" width="9" height="9"/></svg> Microsoft 登录
-                                </button>
-                                <button class="account-btn login-offline" onclick="toggleOfflineForm()">
-                                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> 离线登录
-                                </button>
+                            <div class="account-list" id="accountList">
+                                <div class="account-empty">暂无账号，添加一个吧</div>
                             </div>
-                            <div class="offline-form" id="offlineForm">
-                                <input type="text" class="offline-input" id="offlineUsername" placeholder="输入用户名">
-                                <button class="offline-submit" onclick="offlineLogin()">确认登录</button>
+                            <div class="account-add">
+                                <div class="account-add-title">添加账号</div>
+                                <div class="account-actions">
+                                    <button class="account-btn login-microsoft" onclick="startLogin()">
+                            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><rect x="2" y="2" width="9" height="9"/><rect x="13" y="2" width="9" height="9"/><rect x="2" y="13" width="9" height="9"/><rect x="13" y="13" width="9" height="9"/></svg> Microsoft 登录
+                                    </button>
+                                    <button class="account-btn login-offline" onclick="toggleOfflineForm()">
+                                        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> 离线登录
+                                    </button>
+                                </div>
+                                <div class="offline-form" id="offlineForm">
+                                    <input type="text" class="offline-input" id="offlineUsername" placeholder="输入用户名">
+                                    <button class="offline-submit" onclick="offlineLogin()">确认登录</button>
+                                </div>
                             </div>
                             <button class="account-btn logout-btn" id="logoutBtn" style="display: none; margin-top: 12px;" onclick="logout()">
                                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> 退出登录
                             </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="page" id="pluginsPage">
+                    <div class="plugin-list-view active" id="pluginListView">
+                        <div class="plugin-grid" id="pluginList">
+                            <div class="plugin-empty">放入 plugins/ 文件夹即可识别</div>
+                        </div>
+                        <div style="margin-top:14px;display:flex;justify-content:flex-end;">
+                            <button class="settings-file-btn" onclick="reloadPlugin()">
+                                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                                重新加载
+                            </button>
+                        </div>
+                    </div>
+                    <div class="plugin-detail-view" id="pluginDetailView">
+                        <button class="back-btn" onclick="backToPluginList()">← 返回插件列表</button>
+                        <div class="plugin-detail-head">
+                            <div class="plugin-detail-icon" id="pluginDetailIcon">🧩</div>
+                            <div class="plugin-detail-titles">
+                                <div class="plugin-detail-name" id="pluginDetailName">-</div>
+                                <div class="plugin-detail-meta" id="pluginDetailMeta">-</div>
+                            </div>
+                            <span class="plugin-badge" id="pluginDetailBadge"></span>
+                        </div>
+                        <div class="plugin-detail-error" id="pluginDetailError" style="display:none;"></div>
+                        <dl class="plugin-detail-info" id="pluginDetailInfo"></dl>
+                        <div class="plugin-detail-actions" id="pluginDetailActions"></div>
+                        <div class="plugin-settings" id="pluginSettings" style="display:none;">
+                            <div class="plugin-settings-title">设置</div>
+                            <div class="plugin-settings-form" id="pluginSettingsForm"></div>
+                            <button class="settings-file-btn" onclick="savePluginForm()">保存设置</button>
+                        </div>
+                        <div class="plugin-content-box">
+                            <div id="pluginContent"></div>
                         </div>
                     </div>
                 </div>
@@ -2722,7 +3137,8 @@
                 'versionResourcepacks': '版本资源包管理',
                 'modLoaders': '模组加载器',
                 'account': '账户管理',
-                'settings': '设置'
+                'settings': '设置',
+                'plugins': '插件'
             };
             document.getElementById('headerTitle').textContent = titles[page] || '已安装版本';
             
@@ -2736,6 +3152,17 @@
             } else if (page === 'resourcepacks') {
                 showLoading('resourcepacksList');
                 loadResourcepacksFromLauncher();
+            } else if (page === 'account') {
+                if (pythonInterface && pythonInterface.getAccounts) {
+                    pythonInterface.getAccounts();
+                }
+            } else if (page === 'plugins') {
+                // 规格16③: 每次进入插件页重置子视图回列表 (仍保留 getPlugins 刷新)
+                setPluginView('list');
+                currentDetailId = null;
+                if (pythonInterface && pythonInterface.getPlugins) {
+                    pythonInterface.getPlugins();
+                }
             } else if (page === 'versionMods') {
                 showLoading('versionModsList');
             } else if (page === 'versionWorlds') {
@@ -4934,6 +5361,15 @@
             return div.innerHTML;
         }
 
+        function escapeAttr(text) {
+            return String(text == null ? '' : text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         function formatNumber(num) {
             if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
             if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
@@ -5012,6 +5448,25 @@
 
         function updateLoginStatus(data) {
             console.log('[JS] updateLoginStatus:', data);
+            if (data && data.loggedOut) {
+                isLoggedIn = false;
+                updateUserUI();
+                return;
+            }
+            if (data.silent) {
+                isLoggedIn = true;
+                updateUserUI();
+                if (data && data.name) {
+                    // I-1: silent 也同步身份展示 (切号/删当前后避免侧栏/页头残留旧名)
+                    document.getElementById('sidebarUserName').textContent = data.name;
+                    document.getElementById('sidebarLoginType').textContent = data.isOffline ? '离线模式' : 'Microsoft 账户';
+                    document.getElementById('sidebarAvatar').textContent = data.name[0].toUpperCase();
+                    document.getElementById('pageUserName').textContent = data.name;
+                    document.getElementById('pageLoginType').textContent = data.isOffline ? '离线模式' : 'Microsoft 账户';
+                    document.getElementById('pageAvatar').textContent = data.name[0].toUpperCase();
+                }
+                return;
+            }
             isLoggedIn = true;
             
             // Reset Microsoft login button
@@ -5032,6 +5487,9 @@
             document.getElementById('logoutBtn').style.display = 'block';
             document.getElementById('offlineForm').classList.remove('show');
             
+            if (pythonInterface && pythonInterface.getAccounts) {
+                pythonInterface.getAccounts();
+            }
             navigateTo('versions');
             showToast('欢迎, ' + data.name + '!', 'success');
         }
@@ -5047,6 +5505,386 @@
                 document.getElementById('pageAvatar').textContent = '?';
                 
                 document.getElementById('logoutBtn').style.display = 'none';
+            }
+        }
+
+        // ===== 多账号列表 (账户页) =====
+        let accountListCache = [];
+
+        function accountCardHtml(a) {
+            var name = (a && a.name !== undefined && a.name !== null) ? String(a.name) : '';
+            var initial = name.length ? name.charAt(0).toUpperCase() : '?';
+            var id = (a && a.id !== undefined && a.id !== null) ? String(a.id) : '';
+            var isMicrosoft = !!(a && a.type === 'microsoft');
+            var isCurrent = !!(a && a.isCurrent);
+            var cls = 'account-card' + (isCurrent ? ' is-current' : '');
+            var html = '<div class="' + cls + '" data-id="' + escapeAttr(id) + '" onclick="switchAccount(\'' + escapeAttr(id) + '\')">';
+            html += '<div class="account-card-avatar">' + escapeHtml(initial) + '</div>';
+            html += '<div class="account-card-main">';
+            html += '<span class="account-card-name">' + escapeHtml(name) + '</span>';
+            html += '<span class="account-card-badge ' + (isMicrosoft ? 'badge-microsoft' : 'badge-offline') + '">' +
+                (isMicrosoft ? 'Microsoft' : '离线') + '</span>';
+            html += '</div>';
+            if (isCurrent) {
+                html += '<span class="account-card-current" title="当前账号">✓</span>';
+            }
+            html += '<button type="button" class="account-card-remove" title="删除账号" onclick="event.stopPropagation();confirmRemoveAccount(\'' + escapeAttr(id) + '\')">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+                '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
+                '</button>';
+            html += '</div>';
+            return html;
+        }
+
+        function renderAccountList(accounts) {
+            accountListCache = Array.isArray(accounts) ? accounts : [];
+            var list = document.getElementById('accountList');
+            if (!list) {
+                return;
+            }
+            if (!accountListCache.length) {
+                list.innerHTML = '<div class="account-empty">暂无账号，添加一个吧</div>';
+                return;
+            }
+            var out = '';
+            for (var i = 0; i < accountListCache.length; i++) {
+                out += accountCardHtml(accountListCache[i]);
+            }
+            list.innerHTML = out;
+        }
+
+        function switchAccount(id) {
+            if (!id) {
+                return;
+            }
+            for (var i = 0; i < accountListCache.length; i++) {
+                var item = accountListCache[i];
+                if (item && item.isCurrent && String(item.id) === String(id)) {
+                    return;
+                }
+            }
+            console.log('[JS] switchAccount:', id);
+            if (pythonInterface && pythonInterface.switchAccount) {
+                pythonInterface.switchAccount(id);
+            }
+        }
+
+        function removeAccount(id) {
+            if (!id) {
+                return;
+            }
+            console.log('[JS] removeAccount:', id);
+            if (pythonInterface && pythonInterface.removeAccount) {
+                pythonInterface.removeAccount(id);
+            }
+        }
+
+        function confirmRemoveAccount(id) {
+            if (confirm('确定要删除该账号吗？删除后需要重新登录。')) {
+                removeAccount(id);
+            }
+        }
+
+        // ===== 插件页 (列表 + 详情) =====
+        let pluginListCache = [];
+        let currentDetailId = null;
+        let pluginFormValues = {};
+
+        function pluginBadgeMeta(status) {
+            if (status === 'disabled') return { cls: 'plugin-badge status-disabled', text: '禁用' };
+            if (status === 'error') return { cls: 'plugin-badge status-error', text: '错误' };
+            return { cls: 'plugin-badge status-enabled', text: '启用' };
+        }
+
+        function pluginBadgeHtml(status) {
+            var m = pluginBadgeMeta(status);
+            return '<span class="' + m.cls + '">' + m.text + '</span>';
+        }
+
+        function pluginCardHtml(p) {
+            p = p || {};
+            var id = String(p.id || '');
+            var status = p.status || 'enabled';
+            var html = '<div class="plugin-card" data-id="' + escapeAttr(id) + '" onclick="openPluginDetail(\'' + escapeAttr(id) + '\')">';
+            html += '<div class="plugin-card-icon">' + escapeHtml(p.icon || '🧩') + '</div>';
+            html += '<div class="plugin-card-top">';
+            html += '<span class="plugin-card-name">' + escapeHtml(p.name || id) + '</span>';
+            html += pluginBadgeHtml(status);
+            html += '</div>';
+            html += '<div class="plugin-card-meta">v' + escapeHtml(p.version || '') + ' · ' + escapeHtml(p.author || '') + '</div>';
+            html += '<div class="plugin-card-desc">' + escapeHtml(p.description || '') + '</div>';
+            if (status === 'error' && p.errorMsg) {
+                html += '<div class="plugin-card-error" title="' + escapeAttr(p.errorMsg) + '">' + escapeHtml(p.errorMsg) + '</div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function renderPluginList(plugins) {
+            pluginListCache = Array.isArray(plugins) ? plugins : [];
+            // 规格16②: 列表已不含当前详情 (如卸载后 pluginsLoaded 先到) → 自动回列表视图
+            if (currentDetailId) {
+                var stillThere = false;
+                for (var j = 0; j < pluginListCache.length; j++) {
+                    if (String(pluginListCache[j] && pluginListCache[j].id) === String(currentDetailId)) {
+                        stillThere = true;
+                        break;
+                    }
+                }
+                if (!stillThere) {
+                    currentDetailId = null;
+                    setPluginView('list');
+                }
+            }
+            var list = document.getElementById('pluginList');
+            if (!list) {
+                return;
+            }
+            if (!pluginListCache.length) {
+                list.innerHTML = '<div class="plugin-empty">放入 plugins/ 文件夹即可识别</div>';
+                return;
+            }
+            var out = '';
+            for (var i = 0; i < pluginListCache.length; i++) {
+                out += pluginCardHtml(pluginListCache[i]);
+            }
+            list.innerHTML = out;
+        }
+
+        function setPluginView(view) {
+            var list = document.getElementById('pluginListView');
+            var detail = document.getElementById('pluginDetailView');
+            if (list) list.classList.toggle('active', view === 'list');
+            if (detail) detail.classList.toggle('active', view === 'detail');
+        }
+
+        function openPluginDetail(id) {
+            if (!id) {
+                return;
+            }
+            if (currentDetailId !== String(id)) {
+                // I-2: 跨插件切换清空未保存表单 (同 id 重开/重渲染保留, M1 不变)
+                pluginFormValues = {};
+            }
+            currentDetailId = String(id);
+            setPluginView('detail');
+            console.log('[JS] openPluginDetail:', id);
+            if (pythonInterface && pythonInterface.getPluginDetail) {
+                pythonInterface.getPluginDetail(String(id));
+            }
+        }
+
+        function backToPluginList() {
+            currentDetailId = null;
+            setPluginView('list');
+            if (pythonInterface && pythonInterface.getPlugins) {
+                pythonInterface.getPlugins();
+            }
+        }
+
+        function pluginSettingInputHtml(s, value) {
+            if (!s || !s.key) {
+                return '';
+            }
+            if (!/^[A-Za-z0-9_-]+$/.test(String(s.key))) {
+                // S1: key 白名单 (与 Python _filter_settings 同源), 属性/内联上下文防注入
+                return '';
+            }
+            var key = escapeAttr(String(s.key));
+            var label = escapeHtml(String(s.label || s.key));
+            var v = (value === undefined || value === null) ? '' : value;
+            if (s.type === 'toggle') {
+                return '<label class="plugin-setting-row"><span>' + label + '</span>' +
+                    '<input type="checkbox" data-key="' + key + '"' + (v ? ' checked' : '') +
+                    ' onchange="pluginFieldInput(\'' + key + '\', this)"></label>';
+            }
+            if (s.type === 'number') {
+                return '<label class="plugin-setting-row"><span>' + label + '</span>' +
+                    '<input type="number" class="settings-input" data-key="' + key + '" value="' + escapeAttr(String(v)) +
+                    '" oninput="pluginFieldInput(\'' + key + '\', this)"></label>';
+            }
+            return '<label class="plugin-setting-row"><span>' + label + '</span>' +
+                '<input type="text" class="settings-input" data-key="' + key + '" value="' + escapeAttr(String(v)) +
+                '" oninput="pluginFieldInput(\'' + key + '\', this)"></label>';
+        }
+
+        function pluginFieldInput(key, input) {
+            if (!input) {
+                return;
+            }
+            if (input.type === 'checkbox') {
+                pluginFormValues[key] = !!input.checked;
+            } else if (input.type === 'number') {
+                pluginFormValues[key] = (input.value === '' || input.value === null || input.value === undefined) ? 0 : Number(input.value);
+            } else {
+                pluginFormValues[key] = input.value;
+            }
+        }
+
+        function renderPluginDetail(detail) {
+            if (!detail || !detail.id) {
+                // M2: 载荷缺 id (插件已不存在/后端空回包) → 不滞留详情视图
+                backToPluginList();
+                showToast('插件不存在', 'error');
+                return;
+            }
+            var sameId = currentDetailId === String(detail.id);
+            if (!sameId) {
+                // M1: 仅切换到不同插件时清空未保存表单
+                pluginFormValues = {};
+            }
+            currentDetailId = String(detail.id);
+            setPluginView('detail');
+            var status = detail.status || 'enabled';
+            var badge = pluginBadgeMeta(status);
+
+            var iconEl = document.getElementById('pluginDetailIcon');
+            if (iconEl) iconEl.textContent = detail.icon || '🧩';
+            var nameEl = document.getElementById('pluginDetailName');
+            if (nameEl) nameEl.textContent = detail.name || detail.id;
+            var metaEl = document.getElementById('pluginDetailMeta');
+            if (metaEl) metaEl.textContent = 'v' + (detail.version || '') + ' · ' + (detail.author || '');
+            var badgeEl = document.getElementById('pluginDetailBadge');
+            if (badgeEl) { badgeEl.className = badge.cls; badgeEl.textContent = badge.text; }
+
+            var errEl = document.getElementById('pluginDetailError');
+            if (errEl) {
+                if (detail.errorMsg) {
+                    errEl.textContent = detail.errorMsg;
+                    errEl.style.display = '';
+                } else {
+                    errEl.textContent = '';
+                    errEl.style.display = 'none';
+                }
+            }
+
+            var infoEl = document.getElementById('pluginDetailInfo');
+            if (infoEl) {
+                var dirPath = detail.dir ? String(detail.dir) : '';
+                var dirShort = '';
+                if (dirPath) {
+                    var dirParts = dirPath.replace(/\\/g, '/').split('/').filter(Boolean);
+                    dirShort = dirParts.length > 2 ? '...' + dirParts.slice(-2).join('/') : dirParts.join('/');
+                }
+                infoEl.innerHTML = '<dt>ID</dt><dd>' + escapeHtml(detail.id) + '</dd>' +
+                    '<dt>版本</dt><dd>' + escapeHtml(detail.version || '') + '</dd>' +
+                    '<dt>作者</dt><dd>' + escapeHtml(detail.author || '') + '</dd>' +
+                    '<dt>状态</dt><dd>' + badge.text + '</dd>' +
+                    '<dt>目录</dt><dd title="' + escapeAttr(dirPath) + '">' + escapeHtml(dirShort || '-') + '</dd>';
+            }
+
+            var actionsEl = document.getElementById('pluginDetailActions');
+            if (actionsEl) {
+                var enabled = status !== 'disabled';
+                var idq = escapeAttr(String(detail.id));
+                actionsEl.innerHTML =
+                    '<button class="settings-file-btn" onclick="togglePluginEnabled(\'' + idq + '\',' + (!enabled) + ')">' + (enabled ? '禁用' : '启用') + '</button>' +
+                    '<button class="settings-file-btn" onclick="openPluginFolder(\'' + idq + '\')">打开文件夹</button>' +
+                    '<button class="settings-file-btn" onclick="reloadPlugin()">重新加载</button>' +
+                    '<button class="settings-file-btn" onclick="confirmUninstallPlugin(\'' + idq + '\')">卸载</button>';
+            }
+
+            var settingsWrap = document.getElementById('pluginSettings');
+            var formEl = document.getElementById('pluginSettingsForm');
+            var settings = Array.isArray(detail.settings) ? detail.settings : [];
+            if (formEl) {
+                var out = '';
+                for (var i = 0; i < settings.length; i++) {
+                    var s = settings[i];
+                    if (!s || !s.key || !/^[A-Za-z0-9_-]+$/.test(String(s.key))) {
+                        // S1: key 白名单外的项不渲染、不入表单状态 (与 Python 同源)
+                        continue;
+                    }
+                    if (pluginFormValues[s.key] === undefined) {
+                        pluginFormValues[s.key] = s.value;
+                    }
+                    // M1: 同 id 重渲染时以未保存输入回填
+                    out += pluginSettingInputHtml(s, pluginFormValues[s.key]);
+                }
+                formEl.innerHTML = out;
+            }
+            if (settingsWrap) settingsWrap.style.display = settings.length ? '' : 'none';
+
+            var contentEl = document.getElementById('pluginContent');
+            if (contentEl) {
+                if (status === 'disabled') {
+                    contentEl.innerHTML = '<div class="plugin-note">启用插件后可用</div>';
+                } else if (status === 'error') {
+                    contentEl.innerHTML = '<div class="plugin-note">插件加载出错，修复后点「重新加载」</div>';
+                } else if (detail.contentHtml) {
+                    contentEl.innerHTML = detail.contentHtml;
+                } else {
+                    contentEl.innerHTML = '';
+                }
+            }
+
+            if (detail.success === true) showToast('设置已保存', 'success');
+            if (detail.success === false) showToast(detail.error || '保存设置失败', 'error');
+        }
+
+        function savePluginForm() {
+            if (!currentDetailId) {
+                showToast('请先打开插件详情', 'error');
+                return;
+            }
+            var payload = JSON.stringify(pluginFormValues);
+            console.log('[JS] savePluginForm:', currentDetailId, payload);
+            if (pythonInterface && pythonInterface.savePluginConfig) {
+                pythonInterface.savePluginConfig(String(currentDetailId), payload);
+            }
+        }
+
+        function togglePluginEnabled(id, enabled) {
+            if (!id) {
+                return;
+            }
+            console.log('[JS] togglePluginEnabled:', id, enabled);
+            if (pythonInterface && pythonInterface.setPluginEnabled) {
+                pythonInterface.setPluginEnabled(String(id), !!enabled);
+            }
+            if (pythonInterface && pythonInterface.getPluginDetail) {
+                pythonInterface.getPluginDetail(String(id));
+            }
+        }
+
+        function reloadPlugin() {
+            console.log('[JS] reloadPlugin');
+            if (pythonInterface && pythonInterface.reloadPlugins) {
+                pythonInterface.reloadPlugins();
+            }
+            if (currentDetailId && pythonInterface && pythonInterface.getPluginDetail) {
+                pythonInterface.getPluginDetail(String(currentDetailId));
+            }
+        }
+
+        function confirmUninstallPlugin(id) {
+            if (!id) {
+                return;
+            }
+            if (confirm('确定要卸载该插件吗？该操作不可恢复。')) {
+                uninstallPlugin(id);
+            }
+        }
+
+        function uninstallPlugin(id) {
+            if (!id) {
+                return;
+            }
+            console.log('[JS] uninstallPlugin:', id);
+            if (pythonInterface && pythonInterface.uninstallPlugin) {
+                pythonInterface.uninstallPlugin(String(id));
+            }
+            // 规格16①: 请求发出即回列表并清空详情态 (失败由 Python errorOccurred 提示)
+            backToPluginList();
+        }
+
+        function openPluginFolder(id) {
+            if (!id) {
+                return;
+            }
+            console.log('[JS] openPluginFolder:', id);
+            if (pythonInterface && pythonInterface.openPluginFolder) {
+                pythonInterface.openPluginFolder(String(id));
             }
         }
 

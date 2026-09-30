@@ -1,10 +1,9 @@
-import json
-import os
 import logging
-from pathlib import Path
 from typing import Optional
 
 import minecraft_launcher_lib
+
+from launcher_core.accounts import AccountStore
 
 logger = logging.getLogger("DevLauncher")
 
@@ -30,15 +29,19 @@ class OfflineUser:
 class AuthManager:
     """Handle Microsoft authentication flow"""
 
-    def __init__(self, client_id: str, redirect_url: str = "http://localhost:8080"):
+    def __init__(self, client_id: str, redirect_url: str = "http://localhost:8080",
+                 store: Optional[AccountStore] = None):
         self.client_id = client_id
         self.redirect_url = redirect_url
-        self._login_data: Optional[dict] = None
+        self.store: AccountStore = store if store is not None else AccountStore()
         self._code_verifier: Optional[str] = None
         self._state: Optional[str] = None
-        self._data_dir = Path.home() / ".mc-launcher"
-        self._data_file = self._data_dir / "auth.json"
-        logger.info(f"AuthManager 初始化, 数据目录: {self._data_dir}")
+        try:
+            self.store.migrate_legacy()
+        except Exception:
+            # I-3: 迁移失败不阻断启动 (accounts.json 不可写时本来也写不了)
+            logger.error("旧账号数据迁移失败, 已跳过", exc_info=True)
+        logger.info(f"AuthManager 初始化, 数据目录: {self.store.data_dir}")
 
     def get_login_url(self) -> tuple[str, str, str]:
         """Generate secure login URL and return (url, state, code_verifier)"""
@@ -58,7 +61,7 @@ class AuthManager:
     def complete_login(self, auth_code: str) -> dict:
         """Complete the login process and return user data"""
         try:
-            self._login_data = minecraft_launcher_lib.microsoft_account.complete_login(
+            login_data = minecraft_launcher_lib.microsoft_account.complete_login(
                 self.client_id, None, self.redirect_url, auth_code, self._code_verifier
             )
         except KeyError as e:
@@ -74,72 +77,44 @@ class AuthManager:
             logger.error(f"complete_login 失败: {e}")
             raise
 
-        self._save_login_data()
-        return self._login_data
+        self.store.add(login_data, "microsoft")
+        return login_data
 
     def refresh_login(self, refresh_token: str) -> dict:
         """Refresh an existing login"""
-        self._login_data = minecraft_launcher_lib.microsoft_account.complete_refresh(
-            self.client_id, None, self.redirect_url, refresh_token
-        )
-        self._save_login_data()
-        return self._login_data
+        if self.store.current_id() is None:
+            logger.warning("refresh_login 失败: 未登录")
+            raise RuntimeError("未登录，无法刷新令牌")
+        try:
+            new_data = minecraft_launcher_lib.microsoft_account.complete_refresh(
+                self.client_id, None, self.redirect_url, refresh_token
+            )
+        except Exception as e:
+            logger.error(f"refresh_login 失败: {e}", exc_info=True)
+            raise
+        self.store.update_data(self.store.current_id(), new_data)
+        return new_data
 
     def get_login_data(self) -> Optional[dict]:
         """Get current login data"""
-        if self._login_data is None:
-            self._load_login_data()
-        return self._login_data
+        return self.store.current()
 
     def logout(self):
-        """Clear login data"""
-        logger.info("用户登出, 清除登录数据")
-        self._login_data = None
-        self._clear_saved_data()
-
-    def _save_login_data(self):
-        """Save login data to file"""
-        if self._login_data:
-            try:
-                self._data_dir.mkdir(exist_ok=True)
-                with open(self._data_file, "w", encoding='utf-8') as f:
-                    json.dump(self._login_data, f, indent=2, ensure_ascii=False)
-                logger.info(f"登录数据已保存: {self._data_file}")
-            except Exception as e:
-                logger.error(f"保存登录数据失败: {e}")
-
-    def _load_login_data(self) -> bool:
-        """Load login data from file"""
-        try:
-            if self._data_file.exists():
-                with open(self._data_file, "r", encoding='utf-8') as f:
-                    self._login_data = json.load(f)
-                logger.info(f"登录数据已加载: {self._login_data.get('name', 'unknown')}")
-                return True
-            else:
-                logger.info("登录数据文件不存在")
-        except Exception as e:
-            logger.error(f"加载登录数据失败: {e}")
-        return False
-
-    def _clear_saved_data(self):
-        """Clear saved login data"""
-        try:
-            if self._data_file.exists():
-                self._data_file.unlink()
-                logger.info("登录数据已删除")
-        except Exception as e:
-            logger.error(f"删除登录数据失败: {e}")
+        """Logout user: 取消选中当前账号（账号保留，删除是账户页独立功能）"""
+        logger.info("用户登出, 取消选中当前账号")
+        self.store.deselect()
 
     def offline_login(self, username: str) -> dict:
         """Login with offline mode (no Microsoft account needed)"""
+        if not username.strip():
+            raise ValueError("用户名不能为空")
         logger.info(f"离线登录: {username}")
         user = OfflineUser(username)
-        self._login_data = user.to_dict()
-        self._save_login_data()
-        return self._login_data
+        data = user.to_dict()
+        self.store.add(data, "offline")
+        return data
 
     @property
     def is_logged_in(self) -> bool:
         """Check if user is logged in"""
-        return self.get_login_data() is not None
+        return self.store.current() is not None

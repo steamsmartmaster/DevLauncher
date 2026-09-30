@@ -20,3 +20,5 @@ download_err.txt
 download_log.txt
 test_bg.py
 test_bg2.py
+plugins/enabled.json
+plugins/*/config.json

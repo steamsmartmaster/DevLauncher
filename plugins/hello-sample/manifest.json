@@ -1,0 +1,28 @@
+{
+  "id": "hello-sample",
+  "name": "示例插件",
+  "version": "1.0.0",
+  "author": "DevLauncher",
+  "icon": "👋",
+  "description": "演示插件能力：设置与自定义内容区",
+  "settings": [
+    {
+      "key": "greeting",
+      "label": "问候语",
+      "type": "text",
+      "default": "你好"
+    },
+    {
+      "key": "enabled_anim",
+      "label": "显示动画",
+      "type": "toggle",
+      "default": true
+    },
+    {
+      "key": "max_items",
+      "label": "最大条目",
+      "type": "number",
+      "default": 5
+    }
+  ]
+}

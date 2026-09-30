@@ -24,6 +24,7 @@ except ImportError:
     logger.warning("未安装 minecraft-launcher-lib，原版下载功能将不可用")
 
 from launcher_core import AuthManager, VersionManager, GameLauncher, Settings, ModManager, modrinth_api, curseforge_api
+from launcher_core.plugins import PluginManager
 from launcher_core.api_modloaders import (
     MOD_LOADER_APIS, LOADER_DISPLAY_NAMES,
     get_available_loaders, get_recommended_loaders, install_mod_loader,
@@ -124,6 +125,9 @@ class LauncherBridge(QObject):
     modpackImportProgress = pyqtSignal(str)  # JSON: {current, total, message, file_downloaded, file_total, files}
     modpackImportComplete = pyqtSignal(str)  # JSON result
     modpackInfoLoaded = pyqtSignal(str)  # JSON modpack info
+    accountsLoaded = pyqtSignal(str)  # JSON 账号列表摘要 (store.list(), 不含 data)
+    pluginsLoaded = pyqtSignal(str)  # JSON 插件摘要列表 (PluginManager.scan())
+    pluginDetailLoaded = pyqtSignal(str)  # JSON 插件详情 (save 后带 success/error)
 
     def __init__(self, auth: AuthManager, versions: VersionManager, game: GameLauncher, settings: Settings, mods: ModManager):
         super().__init__()
@@ -132,6 +136,7 @@ class LauncherBridge(QObject):
         self.game = game
         self.settings = settings
         self.mods = mods
+        self.plugins = PluginManager()
         self._game_monitor_timer = QTimer()
         self._game_monitor_timer.timeout.connect(self._check_game_process)
         self._current_mod_version = ""
@@ -376,6 +381,164 @@ class LauncherBridge(QObject):
         """Logout user"""
         logger.info("用户登出")
         self.auth.logout()
+        # 登出后刷新账号列表 (isCurrent 已变化), Task 4 的账户页消费
+        self.accountsLoaded.emit(json.dumps(self.auth.store.list(), ensure_ascii=False))
+
+    @pyqtSlot(result=str)
+    def getAccounts(self):
+        """Get account list summary (also emits accountsLoaded)"""
+        try:
+            list_payload = self.auth.store.list()
+            payload = json.dumps(list_payload, ensure_ascii=False)
+            logger.info(f"获取账号列表: {len(list_payload)} 条")
+            self.accountsLoaded.emit(payload)
+            return payload
+        except Exception as exc:
+            logger.error(f"获取账号列表失败: {exc}", exc_info=True)
+            self.errorOccurred.emit("获取账号列表失败")
+            return ""
+
+    @pyqtSlot(str)
+    def switchAccount(self, account_id: str):
+        """Switch current account; refresh list + login status"""
+        store = self.auth.store
+        try:
+            record = store.switch(account_id)
+            self.accountsLoaded.emit(json.dumps(store.list(), ensure_ascii=False))
+            if record is None:
+                logger.warning(f"切换账号失败: 不存在的账号 {account_id}")
+            else:
+                logger.info(f"已切换账号: {record.get('name')} ({account_id})")
+                self._emit_login_status(silent=True)
+        except Exception as exc:
+            logger.error(f"切换账号失败: {exc}", exc_info=True)
+            self.errorOccurred.emit("切换账号失败")
+
+    @pyqtSlot(str)
+    def removeAccount(self, account_id: str):
+        """Remove an account; refresh list + login status (current falls back)"""
+        store = self.auth.store
+        try:
+            exists = store.get(account_id) is not None
+            if exists:
+                store.remove(account_id)
+            self.accountsLoaded.emit(json.dumps(store.list(), ensure_ascii=False))
+            if not exists:
+                logger.warning(f"删除账号失败: 不存在的账号 {account_id}")
+            else:
+                logger.info(f"已删除账号: {account_id}")
+                current = store.current()
+                current_name = (current or {}).get("name") or "无"
+                logger.info(f"已删除账号，当前切换为: {current_name}")
+                self._emit_login_status(silent=True)
+        except Exception as exc:
+            logger.error(f"删除账号失败: {exc}", exc_info=True)
+            self.errorOccurred.emit("删除账号失败")
+
+    @pyqtSlot(result=str)
+    def getPlugins(self):
+        """Get plugin summary list (also emits pluginsLoaded)"""
+        try:
+            items = self.plugins.scan()
+            payload = json.dumps(items, ensure_ascii=False)
+            logger.info(f"获取插件列表: {len(items)} 条")
+            self.pluginsLoaded.emit(payload)
+            return payload
+        except Exception as exc:
+            logger.error(f"获取插件列表失败: {exc}", exc_info=True)
+            self.errorOccurred.emit("获取插件列表失败")
+            return ""
+
+    @pyqtSlot(str)
+    def getPluginDetail(self, plugin_id: str):
+        """Get single plugin detail (schema + contentHtml) -> pluginDetailLoaded"""
+        try:
+            detail = self.plugins.detail(plugin_id) or {}
+            logger.info(f"获取插件详情: {plugin_id}")
+            self.pluginDetailLoaded.emit(json.dumps(detail, ensure_ascii=False))
+        except Exception as exc:
+            logger.error(f"获取插件详情失败: {exc}", exc_info=True)
+            self.errorOccurred.emit("获取插件详情失败")
+
+    @pyqtSlot(str, bool)
+    def setPluginEnabled(self, plugin_id: str, enabled: bool):
+        """Enable/disable a plugin; refresh list"""
+        try:
+            self.plugins.set_enabled(plugin_id, enabled)
+            logger.info(f"插件启停: {plugin_id} -> {enabled}")
+            self.pluginsLoaded.emit(json.dumps(self.plugins.scan(), ensure_ascii=False))
+        except Exception as exc:
+            logger.error(f"插件启停失败: {exc}", exc_info=True)
+            self.errorOccurred.emit("插件启停失败")
+
+    @pyqtSlot(str, str)
+    def savePluginConfig(self, plugin_id: str, json_cfg: str):
+        """Validate + persist plugin config; reply detail with success/error"""
+        try:
+            cfg = json.loads(json_cfg)
+            if not isinstance(cfg, dict):
+                raise ValueError("配置必须是对象")
+        except (ValueError, TypeError) as exc:
+            self.pluginDetailLoaded.emit(json.dumps({
+                "id": plugin_id, "success": False, "error": f"配置 JSON 无效: {exc}"
+            }, ensure_ascii=False))
+            return
+        try:
+            result = self.plugins.save_config(plugin_id, cfg)
+            detail = self.plugins.detail(plugin_id) or {"id": plugin_id}
+            detail["success"] = bool(result.get("success"))
+            detail["error"] = result.get("error")
+            logger.info(f"保存插件配置: {plugin_id} -> success={detail['success']}")
+            self.pluginDetailLoaded.emit(json.dumps(detail, ensure_ascii=False))
+        except Exception as exc:
+            # S2: save_config/detail/json.dumps 任一异常不得逃逸出槽 (进程 abort 面)
+            logger.error(f"保存插件配置失败: {exc}", exc_info=True)
+            self.errorOccurred.emit("保存插件配置失败")
+
+    @pyqtSlot()
+    def reloadPlugins(self):
+        """Reload all plugins; refresh list"""
+        try:
+            self.plugins.reload()
+            logger.info("重载全部插件")
+            self.pluginsLoaded.emit(json.dumps(self.plugins.scan(), ensure_ascii=False))
+        except Exception as exc:
+            logger.error(f"重载插件失败: {exc}", exc_info=True)
+            self.errorOccurred.emit("重载插件失败")
+
+    @pyqtSlot(str)
+    def openPluginFolder(self, plugin_id: str):
+        """Open plugin folder in explorer (folder_of guards path traversal)"""
+        try:
+            from PyQt6.QtGui import QDesktopServices
+            folder = self.plugins.folder_of(plugin_id)
+            if folder is None:
+                logger.warning(f"插件目录无效或越界: {plugin_id}")
+                self.errorOccurred.emit("插件目录无效")
+                return
+            ok = QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+            if not ok:
+                logger.error(f"打开插件文件夹失败: {folder}")
+                self.errorOccurred.emit("打开插件文件夹失败")
+        except Exception as exc:
+            # S2: 整体兜底, 异常不得逃逸出槽
+            logger.error(f"打开插件文件夹异常: {exc}", exc_info=True)
+            self.errorOccurred.emit("打开插件文件夹失败")
+
+    @pyqtSlot(str)
+    def uninstallPlugin(self, plugin_id: str):
+        """Uninstall a plugin; refresh list"""
+        try:
+            ok = self.plugins.uninstall(plugin_id)
+            if ok:
+                logger.info(f"已卸载插件: {plugin_id}")
+            else:
+                logger.warning(f"卸载插件失败(不存在或越界): {plugin_id}")
+                self.errorOccurred.emit("卸载失败")
+            self.pluginsLoaded.emit(json.dumps(self.plugins.scan(), ensure_ascii=False))
+        except Exception as exc:
+            logger.error(f"卸载插件失败: {exc}", exc_info=True)
+            self.errorOccurred.emit("卸载插件失败")
 
     @pyqtSlot(str)
     def launchGame(self, version_id: str):
@@ -1881,17 +2044,35 @@ class LauncherBridge(QObject):
     @pyqtSlot()
     def checkLoginStatus(self):
         """Check and send login status to JS"""
+        self._emit_login_status()
+
+    def _emit_login_status(self, silent=False):
+        """Emit loginComplete for current account state (reused by switch/remove)
+
+        silent=True: 切号/删除等已停留在账户页的场景，JS 只同步登录态，
+        不 navigateTo/不 toast/不重拉列表 (列表由 accountsLoaded 直推)。
+        """
         login_data = self.auth.get_login_data()
         if login_data:
+            name = login_data.get('name', '')
             is_offline = login_data.get('access_token') == 'offline_token'
-            logger.info(f"检查登录状态: {login_data['name']} (离线: {is_offline})")
+            logger.info(f"检查登录状态: {name} (离线: {is_offline}, silent: {bool(silent)})")
             self.loginComplete.emit(json.dumps({
-                'name': login_data['name'],
-                'id': login_data['id'],
-                'isOffline': is_offline
-            }))
+                'name': name,
+                'id': login_data.get('id', ''),
+                'isOffline': is_offline,
+                'loggedOut': False,
+                'silent': bool(silent)
+            }, ensure_ascii=False))
         else:
             logger.info("无登录数据")
+            self.loginComplete.emit(json.dumps({
+                'loggedOut': True,
+                'name': '未登录',
+                'id': '',
+                'isOffline': False,
+                'silent': bool(silent)
+            }, ensure_ascii=False))
 
 
 class MainWindow(QMainWindow):
@@ -1963,9 +2144,21 @@ class MainWindow(QMainWindow):
         self.bridge.modpackImportProgress.connect(self._on_modpack_import_progress)
         self.bridge.modpackImportComplete.connect(self._on_modpack_import_complete)
         self.bridge.modpackInfoLoaded.connect(self._on_modpack_info_loaded)
+        self.bridge.accountsLoaded.connect(self._on_accounts_loaded)
+        self.bridge.pluginsLoaded.connect(self._on_plugins_loaded)
+        self.bridge.pluginDetailLoaded.connect(self._on_plugin_detail_loaded)
+
+        # 启动加载启用中的插件 (M7: 延后到事件循环 + 兜底, 插件异常不崩启动)
+        QTimer.singleShot(0, self._startup_load_plugins)
         
         # Login status will be checked after JS bridge is ready (via HTML callback)
         logger.info("MainWindow 初始化完成")
+
+    def _startup_load_plugins(self):
+        try:
+            self.bridge.plugins.load_all()
+        except Exception:
+            logger.error("插件预加载失败", exc_info=True)
 
     def _on_versions_loaded(self, versions_json: str):
         logger.info(f"信号: versionsLoaded (长度: {len(versions_json)})")
@@ -2078,6 +2271,27 @@ class MainWindow(QMainWindow):
         logger.info(f"整合包信息加载: {info_json[:200]}")
         self.web_view.page().runJavaScript(
             f"showModpackImportDialog({info_json})"
+        )
+
+    def _on_accounts_loaded(self, accounts_json: str):
+        """Handle account summary list -> JS renderAccountList"""
+        logger.info(f"信号: accountsLoaded (长度: {len(accounts_json)})")
+        self.web_view.page().runJavaScript(
+            f"renderAccountList({accounts_json})"
+        )
+
+    def _on_plugins_loaded(self, plugins_json: str):
+        """Handle plugin summary list -> JS renderPluginList"""
+        logger.info(f"信号: pluginsLoaded (长度: {len(plugins_json)})")
+        self.web_view.page().runJavaScript(
+            f"renderPluginList({plugins_json})"
+        )
+
+    def _on_plugin_detail_loaded(self, detail_json: str):
+        """Handle plugin detail -> JS renderPluginDetail"""
+        logger.info(f"信号: pluginDetailLoaded (长度: {len(detail_json)})")
+        self.web_view.page().runJavaScript(
+            f"renderPluginDetail({detail_json})"
         )
 
     def _on_game_state_changed(self, state: str, extra: str):
