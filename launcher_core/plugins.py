@@ -156,8 +156,9 @@ class PluginContext:
 class PluginManager:
     def __init__(self, plugins_dir: Path | None = None) -> None:
         if plugins_dir is None:
-            # 由文件位置推导仓库根/plugins（launcher_core/plugins.py → 上级/上级）
-            plugins_dir = Path(__file__).resolve().parent.parent / "plugins"
+            # dev：仓库根/plugins；frozen：exe 同目录/plugins（见 paths.app_base_dir）
+            from .paths import app_base_dir
+            plugins_dir = app_base_dir() / "plugins"
         self.plugins_dir = Path(plugins_dir)
         self._manifests: dict[str, dict] = {}
         self._dirs: dict[str, Path] = {}

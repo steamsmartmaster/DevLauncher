@@ -281,3 +281,15 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - `ui/index.html`：侧栏第 8 项（puzzle SVG、data-page="plugins"、tooltip）+ 标题映射；`#pluginsPage` 双视图（列表/详情）；列表卡片（图标/名称/`v1.0.0 · 作者`/启用·禁用·错误三色徽章/简介两行截断/errorMsg title 悬浮/空态）；详情（返回按钮、基本信息含目录、启停/打开文件夹/重新加载/卸载 confirm、三类型设置表单+保存、`#pluginContent` 注入或占位）；`currentDetailId` 判定（卸载成功回列表、列表不含当前 id 自动回退、详情空 id 提示"插件不存在"、navigateTo 重置子视图）；同 id 重渲染保留未保存表单输入；`escapeAttr` 全属性上下文转义
 
 **验证**：红→绿 TDD —— `tests/test_plugin_manager.py` **48 用例**（RED 模块缺失 → 25 → 审查修复 8 项 33 → 质量修复 13 项 46 → S1/dir 48；junction 用例 `mklink /J` 真实生效、B1 源码级 reload 钉死、B6 escape）；`tests/test_plugins_ui.js` **191 断言**（RED Task6 静态 31 → Task7 55 FAIL → harness 修桩 144 → 合并修复轮 29 FAIL → 191）；全套回归 pytest 97、JS 6 套 61/11/22/82/122/191 全 0 FAIL；`py_compile`；提取 `<script>` `node --check`；启动冒烟 15s 存活；两轮规格+质量审查（含 S1 引号注入、S2 槽异常逃逸、卸载回列表等必修项）闭环
+
+### 打包：Windows 单文件版 + b1.1 Release（2026-10-01）
+
+**需求**：构建可直接双击运行的 exe（免安装 Python 与依赖），作为 b1.1 release 上传 GitHub。
+
+**实现**：
+- `launcher_core/paths.py`（新增）：`app_base_dir()` —— frozen（PyInstaller）时返回 **exe 所在目录**（持久、用户可见），开发态返回仓库根；解决打包后 `Path(__file__)` 落在一次性临时解包目录（`_MEIPASS`）导致 logs/plugins 每次启动被清空的问题
+- `main.py`：`LOG_DIR = app_base_dir()/"logs"`，exe 目录不可写（如 Program Files）时回退 `~/.mc-launcher/logs`；`StreamHandler` 加 `sys.stdout is not None` 守卫（`--windowed` 下 stdout 为 None）
+- `launcher_core/plugins.py`：默认插件目录改走 `app_base_dir()/"plugins"`（frozen → exe 同目录，开发态仓库根不变；`scan` 对缺失目录已有 `is_dir` 守卫）
+- `.gitignore` 补 `build/`、`dist/`、`*.spec`；打包命令 `pyinstaller --onefile --windowed --name DevLauncher --add-data "ui;ui" main.py`（WebEngine 由 PyInstaller 内置 hook 收集）；发布 zip = DevLauncher.exe + plugins/hello-sample + CHANGELOG
+
+**验证**：红→绿 TDD —— `tests/test_frozen_paths.py` **6 用例**（RED 4 failed → 实现 paths.py + 接入 → 5 绿 → stdout 守卫 RED 1 failed → GREEN 6）；全套回归 pytest **105**、JS 6 套 61/11/22/82/128/196 全 0 FAIL、`py_compile`、提取 `<script>` `node --check`；**exe 冒烟 35s 存活**（日志落 exe 旁 `logs/launcher.log`、背景图加载、拉取 917 个版本、QtWebEngineProcess 正常）；exe 197.8MB

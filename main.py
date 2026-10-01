@@ -34,8 +34,15 @@ from launcher_core.modpack_importer import ModpackImporter, ModpackInfo
 
 
 # === 日志配置 ===
-LOG_DIR = Path(__file__).parent / "logs"
-LOG_DIR.mkdir(exist_ok=True)
+from launcher_core.paths import app_base_dir
+
+LOG_DIR = app_base_dir() / "logs"
+try:
+    LOG_DIR.mkdir(exist_ok=True)
+except OSError:
+    # exe 目录不可写（如 Program Files）时回退到用户目录
+    LOG_DIR = Path.home() / ".mc-launcher" / "logs"
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 class _SafeStreamHandler(logging.StreamHandler):
     def emit(self, record):
@@ -50,7 +57,7 @@ logging.basicConfig(
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
         logging.FileHandler(LOG_DIR / "launcher.log", encoding='utf-8'),
-        _SafeStreamHandler(sys.stdout)
+        _SafeStreamHandler(sys.stdout if sys.stdout is not None else open(os.devnull, "w", encoding="utf-8"))
     ]
 )
 logger = logging.getLogger("DevLauncher")
