@@ -293,3 +293,15 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - `.gitignore` 补 `build/`、`dist/`、`*.spec`；打包命令 `pyinstaller --onefile --windowed --name DevLauncher --add-data "ui;ui" main.py`（WebEngine 由 PyInstaller 内置 hook 收集）；发布 zip = DevLauncher.exe + plugins/hello-sample + CHANGELOG
 
 **验证**：红→绿 TDD —— `tests/test_frozen_paths.py` **6 用例**（RED 4 failed → 实现 paths.py + 接入 → 5 绿 → stdout 守卫 RED 1 failed → GREEN 6）；全套回归 pytest **105**、JS 6 套 61/11/22/82/128/196 全 0 FAIL、`py_compile`、提取 `<script>` `node --check`；**exe 冒烟 35s 存活**（日志落 exe 旁 `logs/launcher.log`、背景图加载、拉取 917 个版本、QtWebEngineProcess 正常）；exe 197.8MB
+
+### 构建完善：自定义图标 + 版本资源 + 可复现构建脚本（2026-10-01）
+
+**需求**（用户提供 SmartScreen 截图）：exe 仍是 PyInstaller 默认图标——替换为软件自身图标；同时完善构建流程。附带结论：SmartScreen"已保护你的电脑"由**未签名 + 网络下载 MOTW** 导致，与图标无关，换图标不消除；未购买代码签名证书前只能用户侧放行（已在 CHANGELOG 与 release 说明指引"更多信息→仍要运行"或右键属性解除锁定）。
+
+**实现**：
+- `tools/make_icon.py`（新增）：PyQt6 `QSvgRenderer` 把 `ui/icon.svg` 渲染为 16/24/32/48/64/128/256 七档 PNG，纯 Python 手工组装 PNG 直嵌 ICO 容器 → `ui/icon.ico`（21455 字节，零新增依赖）
+- `version_info.txt`（新增）：VSVersionInfo，FileVersion/ProductVersion=1.1.0.0，ProductName/OriginalFilename=DevLauncher（ASCII 规避编码坑）
+- `build_exe.ps1`（新增）：一键流水线——图标缺失自动从 SVG 生成 → `pyinstaller --clean --onefile --windowed --icon --version-file` → 组装发布 zip（exe+hello-sample+CHANGELOG.txt）→ 冒烟（30s 存活 + 日志新写入，杀软扫描窗口期早退自动重试 3 次）；去掉冗余的 `--add-data launcher_core`（PYZ 已含，避免源码影子）
+- `CHANGELOG.txt`（入库）：zip 内更新日志单一事实源，含【首次运行提示】SmartScreen 放行指引
+
+**验证**：红→绿 TDD —— `tests/test_build_assets.py` **4 用例**（RED 4 failed → 三件套落地 → GREEN 4：ICO 头/7 尺寸/32 位/PNG 签名/数据越界、版本资源字段、构建脚本 6 项接线、make_icon 可编译）；回归 pytest **109**、JS 128/196 全 0 FAIL；端到端跑通 `build_exe.ps1`（BUILD OK）；**图标双重实证**：`VersionInfo` 读出 1.1.0.0/DevLauncher + `ExtractAssociatedIcon` 与 `ui/icon.ico` 32px 条目 8×8 网格采样 **pixel_match=121/121**；稳定性：连跑 exe 3×45s 全存活（构建后即测的两次早退 exit=0 定位为杀软扫描窗口瞬态，Defender 检测记录无 DevLauncher 相关项）；诊断副产物 `dist/DevLauncherDbg.exe`（--console 版，stderr 空）
