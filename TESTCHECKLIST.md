@@ -206,3 +206,4 @@
 - [ ] 资源管理器中 DevLauncher.exe 显示**软件自定义图标**（深色圆角 D_ 标），非 PyInstaller 默认图标
 - [ ] 右键 exe → 属性 → 详细信息：文件版本 1.1.0.0、产品名称 DevLauncher
 - [ ] 从浏览器下载 zip 解压后首跑触发 SmartScreen → "更多信息 → 仍要运行"可正常启动（或右键属性解除锁定）
+- [ ] 运行 1 分钟后任务管理器三进程（父+主+渲染）专用内存合计 ≈ 210MB 量级（优化前 275MB）；QtWebEngineProcess 命令行含 `--disable-gpu-compositing`

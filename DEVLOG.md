@@ -305,3 +305,15 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - `CHANGELOG.txt`（入库）：zip 内更新日志单一事实源，含【首次运行提示】SmartScreen 放行指引
 
 **验证**：红→绿 TDD —— `tests/test_build_assets.py` **4 用例**（RED 4 failed → 三件套落地 → GREEN 4：ICO 头/7 尺寸/32 位/PNG 签名/数据越界、版本资源字段、构建脚本 6 项接线、make_icon 可编译）；回归 pytest **109**、JS 128/196 全 0 FAIL；端到端跑通 `build_exe.ps1`（BUILD OK）；**图标双重实证**：`VersionInfo` 读出 1.1.0.0/DevLauncher + `ExtractAssociatedIcon` 与 `ui/icon.ico` 32px 条目 8×8 网格采样 **pixel_match=121/121**；稳定性：连跑 exe 3×45s 全存活（构建后即测的两次早退 exit=0 定位为杀软扫描窗口瞬态，Defender 检测记录无 DevLauncher 相关项）；诊断副产物 `dist/DevLauncherDbg.exe`（--console 版，stderr 空）
+
+### 内存优化：QtWebEngine GPU flags（2026-10-01）
+
+**问题**：任务管理器合计内存 160MB+（HMCL 对照 98MB）。按进程分解（PowerShell WorkingSet/PrivateMemorySize64 + Win32_Process 命令行识别角色）：主进程（Python+QtWebEngine 浏览器侧）~205MB、渲染进程 ~97MB、父 bootloader ~11MB，合计提交内存 **275MB**。
+
+**根因**：QtWebEngine 默认 in-process GPU——GPU/合成器内存挤在主进程；渲染进程另有 ~31MB 私有。**顺带重大发现：C 盘可用空间一度为 0GB**，%TEMP% 积 29 个强杀残留 `_MEI*`（4.8GB）——这才是此前 exe「间歇性 25~40s exit=0 早退/解包 decompression -1」的真正根因（磁盘满→PyInstaller 解包失败），杀软瞬态只是表象；清理后 5/5 启动成功。
+
+**方案**：`launcher_core/webengine_flags.py` 提供 `WEBENGINE_CHROMIUM_FLAGS = --disable-gpu --in-process-gpu --disable-gpu-compositing` 与 `merge_chromium_flags()`（用户自定义 flags 合并、幂等）；`main.py` 在 QApplication 构造前注入 `QTWEBENGINE_CHROMIUM_FLAGS`。
+
+**实验矩阵**（`dist/mem_probe.ps1`，每变体 40s 起 3 次采样，TOTAL_PRIV 已提交内存）：V0 基线 275 → V1 仅 `--single-process` 237（-38，但 QtWebEngine 非官方支持模式，登录 WebView 弹窗风险）→ **V2 三 GPU flags 207.5（-67.5，采用）** → V4 single+GPU 196.7（仅比 V2 多 11，不值）→ V3/V5/V7 `--disable-features` 批量与 `--js-flags` 上限均无叠加增益（206.9~261）。
+
+**验证**：红→绿 TDD —— `tests/test_webengine_flags.py` **5 用例**（RED ModuleNotFoundError → 实现 + main.py 接线 → GREEN）；全套回归 pytest **114** + JS 6 套 128/82/196/11/61/22=**500** 全 0 FAIL + `py_compile`；重打包 BUILD OK（冒烟含在内）；**烧入版终测（无环境变量）TOTAL_PRIV 210.6MB（基线 275，-64MB/-23%）**，渲染进程命令行实测含 `--disable-gpu-compositing`，页面正常渲染（日志 versionsLoaded 新写入）。

@@ -10,6 +10,12 @@ from pathlib import Path
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
+
+from launcher_core.webengine_flags import merge_chromium_flags
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = merge_chromium_flags(
+    os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS")
+)
+
 from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWebEngineWidgets import QWebEngineView
