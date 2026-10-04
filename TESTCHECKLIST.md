@@ -207,3 +207,19 @@
 - [ ] 右键 exe → 属性 → 详细信息：文件版本 1.1.0.0、产品名称 DevLauncher
 - [ ] 从浏览器下载 zip 解压后首跑触发 SmartScreen → "更多信息 → 仍要运行"可正常启动（或右键属性解除锁定）
 - [ ] 运行 1 分钟后任务管理器三进程（父+主+渲染）专用内存合计 ≈ 210MB 量级（优化前 275MB）；QtWebEngineProcess 命令行含 `--disable-gpu-compositing`
+
+## 23. 下载页筛选细化 + 客户端页（2026-10-03 新增）
+- [ ] 模组页左侧筛选面板显示四段（类别/加载器/安装环境/游戏版本），类别前 6 项带图标；「▼ 查看剩余 13 项」展开/收起/计数正常，「清除筛选」可用
+- [ ] 点选任意 chip 立即自动重搜（可空关键词）；清除筛选且无关键词时回落热门列表
+- [ ] 组合筛选结果合理（如 1.21.11+Fabric+优化+Client 应出 Sodium/Iris/EntityCulling 类；客户端+服务器双选取交集）
+- [ ] 切到 CurseForge 源搜索不报错（环境/类别维度降级，仅版本生效）
+- [ ] 版本页卡片右下角：Fabric/Forge/NeoForge/Quilt 版本显示对应 logo、原版显示 3D 草方块；图标缺失时无破图（onerror 隐藏）
+- [ ] 下载页出现「客户端」第 6 页签，首开显示 **19 张卡片（13 客户端 + 6 PVP 模组包）**；新排版：左 56px 图标（有 icon 出图、破图/无 icon 字母兜底）+ 右侧名称 + 分类/类型/平台徽章，备注一行，按钮右对齐
+- [ ] 类型 chips 筛选（全部 19 / 客户端 13 / 模组包 6）；搜索框即时过滤且**含分类关键词**（搜「作弊」应命中 meteor/bleachhack/payload 3 卡）；无匹配显示空态文案
+- [ ] jar 客户端点「下载」**先弹版本选择器**（最新版本置顶），选中后按钮「下载中…」→ 完成 toast 含文件名 + 卡片「已下载」；失败 error toast 且按钮恢复可再点
+- [ ] Meteor 选具体版本（如 1.21.11）经官网 `?version=` API 直下，版本列表来自 /archive（8 版本）；BleachHack 多版本 jar 选中后按所选资产直链下载
+- [ ] PVP 模组包点「下载」弹版本选择器（带实例名输入框），选中走整合包安装管线（卡片不置下载中态，看全局进度提示）
+- [ ] open_page 条目（Wurst/Ares/Payload/ATH）点「打开页面」调起浏览器，**不弹**版本选择器、不拉版本列表
+- [ ] 下载落盘位置：未选版本 → `.minecraft/mods`；选中隔离版本 → `versions/<id>/mods`
+- [ ] FPSMaster 下载到 .jar 而非 .zip；MasterMind 正常出 jar；AxolotlClient 经 CurseForge search+files 下载
+- [ ] 网络断开时失败提示带 endpoint 便于排查

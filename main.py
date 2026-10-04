@@ -31,6 +31,9 @@ except ImportError:
 
 from launcher_core import AuthManager, VersionManager, GameLauncher, Settings, ModManager, modrinth_api, curseforge_api
 from launcher_core.plugins import PluginManager
+from launcher_core import clients_catalog
+from launcher_core.api_github import github_api
+from launcher_core.api_meteor import meteor_api
 from launcher_core.api_modloaders import (
     MOD_LOADER_APIS, LOADER_DISPLAY_NAMES,
     get_available_loaders, get_recommended_loaders, install_mod_loader,
@@ -141,6 +144,8 @@ class LauncherBridge(QObject):
     accountsLoaded = pyqtSignal(str)  # JSON 账号列表摘要 (store.list(), 不含 data)
     pluginsLoaded = pyqtSignal(str)  # JSON 插件摘要列表 (PluginManager.scan())
     pluginDetailLoaded = pyqtSignal(str)  # JSON 插件详情 (save 后带 success/error)
+    clientsLoaded = pyqtSignal(str)  # JSON 客户端目录列表 (clients_catalog.get_catalog())
+    clientDownloadFinished = pyqtSignal(str)  # JSON {id, ok, message}
 
     def __init__(self, auth: AuthManager, versions: VersionManager, game: GameLauncher, settings: Settings, mods: ModManager):
         super().__init__()
@@ -1198,6 +1203,293 @@ class LauncherBridge(QObject):
                 self.errorOccurred.emit(f"搜索失败: {e}")
         threading.Thread(target=_do_search, daemon=True).start()
 
+    @pyqtSlot(str, str, str, str, str, str)
+    def searchMods(self, query: str, game_versions: str, loaders: str, categories: str,
+                   environments: str, source: str = "modrinth"):
+        """模组细化筛选搜索（game_versions/loaders/categories/environments 为逗号分隔多选）"""
+        logger.info(f"筛选搜索: query='{query}', v='{game_versions}', l='{loaders}', "
+                    f"c='{categories}', e='{environments}', source='{source}'")
+
+        def _do_search():
+            try:
+                def split(s: str) -> list:
+                    return [x for x in (s or "").split(",") if x]
+
+                versions = split(game_versions)
+                loader_list = split(loaders)
+                category_list = split(categories)
+                env_list = split(environments)
+
+                formatted = []
+                if source == "curseforge":
+                    results = curseforge_api.search_mods(
+                        query=query,
+                        game_version=versions[0] if versions else None
+                    )
+                    for hit in results.get("hits", []):
+                        icon_url = ""
+                        if hit.get("logo"):
+                            icon_url = hit["logo"].get("thumbnailUrl", "")
+                        formatted.append({
+                            "id": str(hit.get("id", "")),
+                            "title": hit.get("name", ""),
+                            "description": hit.get("summary", ""),
+                            "downloads": hit.get("downloadCount", 0),
+                            "icon_url": icon_url,
+                            "author": hit["authors"][0].get("name", "") if hit.get("authors") else "",
+                            "date_modified": hit.get("dateModified", ""),
+                            "versions": [],
+                            "loaders": [],
+                            "project_type": "mods",
+                            "source": "curseforge"
+                        })
+                else:
+                    results = modrinth_api.search(
+                        query=query,
+                        project_type="mods",
+                        limit=20,
+                        versions=versions,
+                        loaders=loader_list,
+                        categories=category_list,
+                        environments=env_list
+                    )
+                    for hit in results.get("hits", []):
+                        icon_url = hit.get("icon_url", "")
+                        project_id = hit.get("project_id", "")
+                        if not icon_url and project_id:
+                            icon_url = f"https://cdn.modrinth.com/data/{project_id}/icon.png"
+                        elif not icon_url:
+                            slug = hit.get("slug", "")
+                            if slug:
+                                icon_url = f"https://cdn.modrinth.com/data/{slug}/icon.png"
+                        formatted.append({
+                            "id": hit.get("slug") or project_id,
+                            "title": hit.get("title", ""),
+                            "description": hit.get("description", ""),
+                            "downloads": hit.get("downloads", 0),
+                            "icon_url": icon_url,
+                            "author": hit.get("author", ""),
+                            "date_modified": hit.get("date_modified", ""),
+                            "versions": hit.get("versions", []),
+                            "loaders": hit.get("loaders", []),
+                            "project_type": hit.get("project_type", ""),
+                            "source": "modrinth"
+                        })
+
+                result_json = json.dumps({
+                    "hits": formatted,
+                    "total_hits": results.get("total_hits", 0),
+                    "source": source,
+                    "tab": "mods"
+                })
+                logger.info(f"筛选搜索结果 ({source}): {len(formatted)} 个")
+                self.searchResults.emit(result_json)
+            except Exception as e:
+                logger.error(f"筛选搜索失败: {e}", exc_info=True)
+                self.errorOccurred.emit(f"搜索失败: {e}")
+
+        threading.Thread(target=_do_search, daemon=True).start()
+
+    @pyqtSlot()
+    def getClients(self):
+        """下发内置客户端/PVP整合包目录（19 条 = 13 client + 6 pack，静态随包）"""
+        try:
+            payload = json.dumps(clients_catalog.get_catalog(), ensure_ascii=False)
+            logger.info(f"客户端目录下发: {len(payload)} 字节")
+            self.clientsLoaded.emit(payload)
+        except Exception as e:
+            logger.error(f"获取客户端目录失败: {e}", exc_info=True)
+            self.errorOccurred.emit(f"获取客户端目录失败: {e}")
+
+    @pyqtSlot(str)
+    def downloadClient(self, client_id: str):
+        """快速下载客户端条目（最新版，绕过版本选择）"""
+        self.downloadClientVersion(client_id, "", "")
+
+    @pyqtSlot(str)
+    def getClientVersions(self, client_id: str):
+        """客户端条目可选版本列表（复用 modVersions 信号 → updateModVersions 渲染）"""
+        def _emit(items: list):
+            self.modVersions.emit(json.dumps({"content_id": client_id, "versions": items},
+                                             ensure_ascii=False))
+
+        latest = {"id": "", "name": "最新版本", "version_number": "",
+                  "game_versions": [], "loaders": [], "date_published": "",
+                  "downloads": 0, "filename": "", "url": "", "featured": True}
+
+        def _do_fetch():
+            try:
+                entry = clients_catalog.get_entry(client_id)
+                if not entry:
+                    raise RuntimeError(f"未知客户端条目: {client_id}")
+                strategy = entry["strategy"]
+                formatted: list = []
+                if strategy == "github_latest_jar":
+                    formatted = clients_catalog.format_github_release_items(
+                        github_api.get_releases(entry["endpoint"]))
+                    if not formatted:
+                        raise RuntimeError(f"GitHub 无可下载 jar: {entry['endpoint']}")
+                elif strategy in ("modrinth_latest_jar", "modrinth_modpack"):
+                    for v in modrinth_api.get_project_versions(entry["endpoint"]):
+                        files = v.get("files", [])
+                        primary_file = files[0] if files else {}
+                        formatted.append({
+                            "id": v.get("id", ""),
+                            "name": v.get("name", ""),
+                            "version_number": v.get("version_number", ""),
+                            "game_versions": v.get("game_versions", []),
+                            "loaders": v.get("loaders", []),
+                            "date_published": v.get("date_published", ""),
+                            "downloads": v.get("downloads", 0),
+                            "filename": primary_file.get("filename", ""),
+                            "url": primary_file.get("url", ""),
+                            "featured": v.get("featured", False),
+                        })
+                elif strategy == "meteor_download":
+                    for mv in meteor_api.get_archive_versions():
+                        formatted.append({
+                            "id": mv["version"], "name": mv["label"],
+                            "version_number": mv["version"],
+                            "game_versions": [mv["version"]],
+                            "loaders": ["fabric"], "date_published": "",
+                            "downloads": 0, "filename": "", "url": "", "featured": False,
+                        })
+                    if not formatted:
+                        raise RuntimeError("Meteor archive 无可用版本")
+                elif strategy == "curseforge_search_jar":
+                    results = curseforge_api.search_mods(query=entry["endpoint"])
+                    hits = results.get("hits", [])
+                    if not hits:
+                        raise RuntimeError(f"CurseForge 搜索无结果: {entry['endpoint']}")
+                    files = curseforge_api.get_mod_files(hits[0].get("id")) or []
+                    for f in files:
+                        formatted.append({
+                            "id": str(f.get("id", "")),
+                            "name": f.get("displayName", f.get("fileName", "")),
+                            "version_number": f.get("displayName", ""),
+                            "game_versions": f.get("gameVersions", []),
+                            "loaders": [], "date_published": f.get("fileDate", ""),
+                            "downloads": f.get("downloadCount", 0),
+                            "filename": f.get("fileName", ""),
+                            "url": f.get("downloadUrl") or "", "featured": False,
+                        })
+                else:
+                    raise RuntimeError(f"strategy 不支持版本列表: {strategy}")
+                _emit([latest] + formatted)
+            except Exception as e:
+                logger.error(f"获取客户端版本失败: {e}", exc_info=True)
+                # 失败也给出「最新版本」入口，点击后在下载阶段报错
+                _emit([latest])
+        threading.Thread(target=_do_fetch, daemon=True).start()
+
+    @pyqtSlot(str, str, str)
+    def downloadClientVersion(self, client_id: str, version_id: str, custom_name: str):
+        """按选中版本下载客户端条目（version_id 空=最新；包=委托整合包安装管线）"""
+        entry = clients_catalog.get_entry(client_id)
+        if not entry:
+            self.errorOccurred.emit(f"未知客户端条目: {client_id}")
+            return
+        if entry["strategy"] == "open_page":
+            self.errorOccurred.emit(f"{entry['name']} 无下载 API，请使用「打开页面」")
+            return
+        if entry["strategy"] == "modrinth_modpack":
+            # 复用整合包下载+自动安装管线（含自定义实例名）
+            self.downloadModpackVersion(entry["endpoint"], version_id or "", "modrinth", custom_name)
+            return
+        logger.info(f"下载客户端条目: {entry['id']} 版本={version_id or '最新'}")
+
+        def _finish(ok: bool, message: str):
+            self.clientDownloadFinished.emit(json.dumps(
+                {"id": client_id, "ok": ok, "message": message}, ensure_ascii=False))
+
+        def _do_download():
+            try:
+                strategy = entry["strategy"]
+                url, filename = None, None
+                if strategy == "meteor_download":
+                    jar = meteor_api.get_jar(version_id)
+                    if not jar:
+                        raise RuntimeError("Meteor 下载 API 无响应")
+                    url, filename = jar["url"], jar["filename"]
+                elif strategy == "github_latest_jar":
+                    if version_id.startswith("http"):
+                        # 版本列表 id = 资产直链
+                        url = version_id
+                        filename = os.path.basename(urlparse(url).path) or f"{entry['id']}.jar"
+                    else:
+                        release = github_api.get_latest_release(entry["endpoint"])
+                        if not release:
+                            raise RuntimeError(f"GitHub releases/latest 无响应: {entry['endpoint']}")
+                        asset = clients_catalog.pick_github_asset(release)
+                        if not asset:
+                            raise RuntimeError(f"最新 release 无可下载 jar: {entry['endpoint']}")
+                        url, filename = asset["url"], asset["filename"]
+                elif strategy == "modrinth_latest_jar":
+                    if version_id:
+                        version = modrinth_api.get_version(version_id)
+                        if not version:
+                            raise RuntimeError(f"Modrinth 版本不存在: {version_id}")
+                        picked = clients_catalog.pick_modrinth_file(version)
+                    else:
+                        versions = modrinth_api.get_project_versions(entry["endpoint"])
+                        if not versions:
+                            raise RuntimeError(f"Modrinth 无可用版本: {entry['endpoint']}")
+                        picked = clients_catalog.pick_modrinth_file(versions[0])
+                    if not picked:
+                        raise RuntimeError(f"该版本无可下载 jar: {entry['endpoint']}")
+                    url, filename = picked["url"], picked["filename"]
+                elif strategy == "curseforge_search_jar":
+                    results = curseforge_api.search_mods(query=entry["endpoint"])
+                    hits = results.get("hits", [])
+                    if not hits:
+                        raise RuntimeError(f"CurseForge 搜索无结果: {entry['endpoint']}")
+                    files = curseforge_api.get_mod_files(hits[0].get("id")) or []
+                    if not files:
+                        raise RuntimeError(f"CurseForge 该模组无文件: {entry['endpoint']}")
+                    if version_id:
+                        file_info = next(
+                            (f for f in files if str(f.get("id")) == str(version_id)), None)
+                        if not file_info:
+                            raise RuntimeError(f"CurseForge 指定文件不存在: {version_id}")
+                    else:
+                        file_info = files[0]
+                    url = (file_info.get("downloadUrl")
+                           or f"https://edge.forgecdn.net/files/{file_info.get('id', '')}")
+                    filename = (file_info.get("fileName")
+                                or f"{entry['id']}-{file_info.get('id', '')}.jar")
+                else:
+                    raise RuntimeError(f"未知 strategy: {strategy}")
+
+                # 落盘目录：与现行规则同源（选中且隔离 → 隔离 mods）
+                current = self._current_mod_version
+                isolated = bool(current) and self.versions.is_version_isolated(current)
+                dest_dir = clients_catalog.client_dest_dir(
+                    self.settings.get("minecraft_dir"),
+                    current,
+                    isolated,
+                    self.versions.get_mods_path(current) if isolated else None,
+                )
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest_path = dest_dir / filename
+                if not modrinth_api.download_file(url, str(dest_path)):
+                    raise RuntimeError(f"文件下载失败: {url}")
+                logger.info(f"客户端条目已保存: {dest_path}")
+                _finish(True, f"已保存 {filename}")
+            except Exception as e:
+                logger.error(f"下载客户端条目失败: {e}", exc_info=True)
+                _finish(False, str(e))
+
+        threading.Thread(target=_do_download, daemon=True).start()
+
+    @pyqtSlot(str)
+    def openClientSite(self, url: str):
+        """打开条目官网（open_page 类）"""
+        if not url or not url.startswith("http"):
+            self.errorOccurred.emit(f"非法链接: {url}")
+            return
+        logger.info(f"打开客户端页面: {url}")
+        webbrowser.open(url)
+
     @pyqtSlot(str, str)
     def downloadContent(self, content_id: str, content_type: str):
         """Download content from Modrinth"""
@@ -2160,6 +2452,8 @@ class MainWindow(QMainWindow):
         self.bridge.accountsLoaded.connect(self._on_accounts_loaded)
         self.bridge.pluginsLoaded.connect(self._on_plugins_loaded)
         self.bridge.pluginDetailLoaded.connect(self._on_plugin_detail_loaded)
+        self.bridge.clientsLoaded.connect(self._on_clients_loaded)
+        self.bridge.clientDownloadFinished.connect(self._on_client_download_finished)
 
         # 启动加载启用中的插件 (M7: 延后到事件循环 + 兜底, 插件异常不崩启动)
         QTimer.singleShot(0, self._startup_load_plugins)
@@ -2305,6 +2599,20 @@ class MainWindow(QMainWindow):
         logger.info(f"信号: pluginDetailLoaded (长度: {len(detail_json)})")
         self.web_view.page().runJavaScript(
             f"renderPluginDetail({detail_json})"
+        )
+
+    def _on_clients_loaded(self, clients_json: str):
+        """Handle client catalog -> JS renderClientList"""
+        logger.info(f"信号: clientsLoaded (长度: {len(clients_json)})")
+        self.web_view.page().runJavaScript(
+            f"renderClientList({clients_json})"
+        )
+
+    def _on_client_download_finished(self, result_json: str):
+        """Handle client download result -> JS onClientDownloadFinished"""
+        logger.info(f"信号: clientDownloadFinished: {result_json[:200]}")
+        self.web_view.page().runJavaScript(
+            f"onClientDownloadFinished({result_json})"
         )
 
     def _on_game_state_changed(self, state: str, extra: str):

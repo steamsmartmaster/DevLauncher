@@ -266,6 +266,19 @@
             padding: 16px;
             cursor: pointer;
             transition: all 0.3s;
+            position: relative;
+        }
+
+        .version-loader-icon {
+            position: absolute;
+            right: 8px;
+            bottom: 8px;
+            width: 22px;
+            height: 22px;
+            object-fit: contain;
+            filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+            pointer-events: none;
+            z-index: 2;
         }
 
         .version-card:hover {
@@ -1622,6 +1635,241 @@
             min-width: 0;
         }
 
+        .mod-filter-layout {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .mod-filter-panel {
+            width: 252px;
+            flex-shrink: 0;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 14px;
+            max-height: calc(100vh - 220px);
+            overflow-y: auto;
+        }
+
+        .mf-section {
+            margin-bottom: 16px;
+        }
+
+        .mf-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .mf-chips {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .mf-chip {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 10px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
+        .mf-chip:hover {
+            background: rgba(255, 255, 255, 0.10);
+            color: #ffffff;
+        }
+
+        .mf-chip.active {
+            background: rgba(var(--accent-rgb, 120, 160, 255), 0.18);
+            border-color: var(--accent-color);
+            color: #ffffff;
+        }
+
+        .mf-chip-icon {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+            opacity: 0.9;
+        }
+
+        .mf-more {
+            display: block;
+            width: 100%;
+            margin-top: 8px;
+            padding: 5px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            text-align: center;
+            border-radius: 6px;
+        }
+
+        .mf-more:hover {
+            background: rgba(255, 255, 255, 0.06);
+            color: #ffffff;
+        }
+
+        .mf-clear {
+            display: block;
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .mf-clear:hover {
+            color: var(--accent-color);
+        }
+
+        .mod-filter-layout .download-results {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .client-type-chips {
+            display: flex;
+            gap: 8px;
+        }
+
+        .client-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 12px;
+        }
+
+        .client-card {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .client-card-top {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .client-icon {
+            position: relative;
+            width: 56px;
+            height: 56px;
+            border-radius: 10px;
+            overflow: hidden;
+            flex: none;
+            background: rgba(255, 255, 255, 0.08);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .client-icon-img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .client-icon-fallback {
+            font-size: 22px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.55);
+        }
+
+        .client-title-col {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .client-name {
+            font-weight: 700;
+            font-size: 16px;
+        }
+
+        .client-badges {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .client-badge {
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+        }
+
+        .client-badge.pack {
+            background: rgba(250, 150, 60, 0.18);
+            color: #f5b26a;
+        }
+
+        .client-badge.cat {
+            background: rgba(99, 140, 255, 0.18);
+            color: #9db8ff;
+        }
+
+        .client-note {
+            font-size: 12px;
+            color: var(--text-muted);
+            min-height: 30px;
+        }
+
+        .client-actions {
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .client-btn {
+            padding: 7px 18px;
+            border-radius: 8px;
+            border: 1px solid var(--accent-color);
+            background: rgba(255, 255, 255, 0.08);
+            color: #ffffff;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .client-btn:hover:not(:disabled) {
+            background: var(--accent-color);
+        }
+
+        .client-btn:disabled {
+            opacity: 0.55;
+            cursor: default;
+        }
+
+        .client-empty {
+            text-align: center;
+            color: var(--text-muted);
+            padding: 40px;
+        }
+
         .mod-loader-selector {
             background: rgba(255, 255, 255, 0.04);
             border: 1px solid rgba(255, 255, 255, 0.08);
@@ -2369,6 +2617,10 @@
                             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
                             世界
                         </button>
+                        <button class="download-tab" data-dl-tab="clients" onclick="switchDownloadTab('clients')">
+                            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                            客户端
+                        </button>
                     </div>
                     <div class="download-content" id="downloadContent">
                         <!-- Version download with mod loader selector -->
@@ -2448,20 +2700,34 @@
                                         <div class="custom-dropdown-item" data-value="curseforge">CurseForge</div>
                                     </div>
                                 </div>
-                                <select class="settings-input" id="modGameVersion" style="width:120px;">
-                                    <option value="">全部版本</option>
-                                </select>
-                                <select class="settings-input" id="modLoaderFilter" style="width:120px;">
-                                    <option value="">全部加载器</option>
-                                    <option value="fabric">Fabric</option>
-                                    <option value="forge">Forge</option>
-                                    <option value="neoforge">NeoForge</option>
-                                    <option value="quilt">Quilt</option>
-                                </select>
-                                <input type="text" class="settings-input" id="modSearch" placeholder="搜索模组..." style="flex:1;" onkeydown="if(event.key==='Enter'){if(!this.value.trim()){loadTrendingContent('mods');}else{searchContentFiltered('mods');}}">
-                                <button class="settings-file-btn" onclick="if(!document.getElementById('modSearch').value.trim()){loadTrendingContent('mods');}else{searchContentFiltered('mods');}">搜索</button>
+                                <input type="text" class="settings-input" id="modSearch" placeholder="搜索模组..." style="flex:1;" onkeydown="if(event.key==='Enter'){searchContentFiltered('mods');}">
+                                <button class="settings-file-btn" onclick="searchContentFiltered('mods')">搜索</button>
                             </div>
-                            <div class="download-results" id="modsResults"></div>
+                            <div class="mod-filter-layout">
+                                <div class="mod-filter-panel" id="modFilterPanel">
+                                    <div class="mf-section">
+                                        <div class="mf-title">类别</div>
+                                        <div class="mf-chips" id="mfCatList"></div>
+                                        <button class="mf-more" id="mfCatMore" onclick="toggleMfExpand('categories')"></button>
+                                    </div>
+                                    <div class="mf-section">
+                                        <div class="mf-title">加载器</div>
+                                        <div class="mf-chips" id="mfLoaderList"></div>
+                                        <button class="mf-more" id="mfLoaderMore" onclick="toggleMfExpand('loaders')"></button>
+                                    </div>
+                                    <div class="mf-section">
+                                        <div class="mf-title">安装环境</div>
+                                        <div class="mf-chips" id="mfEnvList"></div>
+                                    </div>
+                                    <div class="mf-section">
+                                        <div class="mf-title">游戏版本</div>
+                                        <div class="mf-chips" id="mfVersionList"></div>
+                                        <button class="mf-more" id="mfVersionMore" onclick="toggleMfExpand('versions')"></button>
+                                    </div>
+                                    <div class="mf-clear" onclick="clearModFilters()">清除筛选</div>
+                                </div>
+                                <div class="download-results" id="modsResults"></div>
+                            </div>
                         </div>
                         <!-- Datapack download -->
                         <div class="download-tab-content" id="dlDatapacks">
@@ -2492,6 +2758,18 @@
                                 <button class="settings-file-btn" onclick="if(!document.getElementById('worldSearch').value.trim()){loadTrendingContent('worlds');}else{searchContent('worlds');}">搜索</button>
                             </div>
                             <div class="download-results" id="worldsResults"></div>
+                        </div>
+                        <!-- Client & PVP pack catalog -->
+                        <div class="download-tab-content" id="dlClients">
+                            <div class="download-filter-bar">
+                                <div class="client-type-chips">
+                                    <div class="mf-chip active" data-ctype="all" onclick="setClientFilter('all')">全部</div>
+                                    <div class="mf-chip" data-ctype="client" onclick="setClientFilter('client')">客户端</div>
+                                    <div class="mf-chip" data-ctype="pack" onclick="setClientFilter('pack')">PVP 模组包</div>
+                                </div>
+                                <input type="text" class="settings-input" id="clientSearch" placeholder="搜索客户端..." style="flex:1;" oninput="filterClients()">
+                            </div>
+                            <div class="download-results" id="clientsResults"></div>
                         </div>
                     </div>
                 </div>
@@ -3041,8 +3319,8 @@
                     <span>启动游戏</span>
                 </button>
             </div>
-        </div>
-    </div>
+                    </div>
+                </div>
 
     <div class="toast" id="toast">
         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
@@ -3396,6 +3674,10 @@
                 applyValue(sel, prevValue);
             });
 
+            // 同步到模组筛选面板的游戏版本 chips
+            mfVersionsList = gameVersions;
+            if (typeof renderModFilterPanel === 'function') renderModFilterPanel();
+
             // Populate picker dropdown (always use common versions)
             var pickerSel = document.getElementById('pickerGameVersion');
             if (pickerSel) {
@@ -3440,15 +3722,23 @@
             else if (v.type === 'snapshot') typeIcon = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>';
             else if (v.type === 'old_beta' || v.type === 'old_alpha') typeIcon = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
 
-            // Detect mod loader from version ID
+            // Detect mod loader: version id (-Fabric-) first, then entry loaders
+            // field (modpack ids like "Fabulously Optimized ... for 26.1.2" have none)
             var loaderBadge = '';
             var loaderColors = { forge: '#60a5fa', neoforge: '#c084fc', fabric: '#4ade80', quilt: '#fb923c', optifine: '#facc15' };
             var loaderMatch = v.id.match(/-(Forge|NeoForge|Fabric|Quilt|OptiFine)-/i);
-            if (loaderMatch) {
-                var loaderName = loaderMatch[1];
+            var loaderName = loaderMatch ? loaderMatch[1] : '';
+            if (!loaderName && v.loaders && v.loaders.length && v.loaders[0].type) {
+                var lt = String(v.loaders[0].type).toLowerCase();
+                var nameMap = { fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt', optifine: 'OptiFine' };
+                if (nameMap[lt]) loaderName = nameMap[lt];
+            }
+            if (loaderName) {
                 var color = loaderColors[loaderName.toLowerCase()] || '#888';
                 loaderBadge = '<span style="background:' + color + '22;color:' + color + ';padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-left:8px;">' + loaderName + '</span>';
             }
+            // 右下角图标：加载器 logo，原版为 3D 草方块
+            var loaderIconSrc = loaderName ? ('static/icons/loaders/' + loaderName.toLowerCase() + '.png') : 'static/icons/grass_block.png';
             var installBadge = '';
             var actionsHtml = '';
             if (showInstalled) {
@@ -3478,7 +3768,8 @@
                 '<span><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>' + (v.releaseTime || '-') + '</span>' +
                 '</div>' +
                 installBadge +
-                actionsHtml;
+                actionsHtml +
+                '<img class="version-loader-icon" src="' + loaderIconSrc + '" alt="" onerror="this.style.display=\'none\'">';
             return card;
         }
 
@@ -4027,7 +4318,8 @@
             mods: false,
             modpacks: false,
             worlds: false,
-            datapacks: false
+            datapacks: false,
+            clients: false
         };
 
         var tabSources = {
@@ -4055,6 +4347,130 @@
             return getCustomDropdownValue(dropdownId) || tabSources[tabType] || 'modrinth';
         }
 
+        // === Client catalog (客户端子页签) ===
+        var clientsData = [];
+        var clientsType = 'all';
+        var clientsQuery = '';
+        var clientsDownloading = {};
+        var clientsDownloaded = {};
+
+        function loadClients() {
+            var box = document.getElementById('clientsResults');
+            if (box) box.innerHTML = '<div style="text-align:center;padding:40px;color:rgba(255,255,255,0.5);">加载客户端目录...</div>';
+            if (pythonInterface && pythonInterface.getClients) pythonInterface.getClients();
+        }
+
+        function renderClientList(list) {
+            clientsData = list || [];
+            filterClients();
+        }
+
+        function setClientFilter(t) {
+            clientsType = t;
+            document.querySelectorAll('[data-ctype]').forEach(function(chip) {
+                chip.classList.toggle('active', chip.dataset.ctype === t);
+            });
+            filterClients();
+        }
+
+        function filterClients() {
+            var input = document.getElementById('clientSearch');
+            clientsQuery = input && input.value ? input.value.trim().toLowerCase() : '';
+            var items = clientsData.filter(function(c) {
+                if (clientsType !== 'all' && c.type !== clientsType) return false;
+                if (clientsQuery) {
+                    var hay = ((c.name || '') + ' ' + (c.id || '') + ' ' + (c.note || '') + ' ' + (c.category || '')).toLowerCase();
+                    if (hay.indexOf(clientsQuery) < 0) return false;
+                }
+                return true;
+            });
+            var box = document.getElementById('clientsResults');
+            if (!box) return;
+            if (!items.length) {
+                box.innerHTML = '<div class="client-empty">没有匹配的条目</div>';
+                return;
+            }
+            box.innerHTML = '<div class="client-grid">' + items.map(clientCardHtml).join('') + '</div>';
+        }
+
+        function clientCardHtml(c) {
+            var downloading = !!clientsDownloading[c.id];
+            var downloaded = !!clientsDownloaded[c.id];
+            var action;
+            if (c.strategy === 'open_page') {
+                action = '<button class="client-btn" onclick="openClientSite(\'' + escapeAttr(c.endpoint) + '\')">打开页面</button>';
+            } else if (downloading) {
+                action = '<button class="client-btn" disabled>下载中…</button>';
+            } else if (downloaded) {
+                action = '<button class="client-btn" disabled>已下载</button>';
+            } else {
+                action = '<button class="client-btn" onclick="downloadClientWithPicker(\'' + c.id + '\')">下载</button>';
+            }
+            var iconHtml = '<div class="client-icon">' +
+                (c.icon ? '<img class="client-icon-img" src="' + escapeAttr(c.icon) + '" alt="" onerror="this.remove()">' : '') +
+                '<span class="client-icon-fallback">' + ((c.name || '?').charAt(0)) + '</span></div>';
+            var typeBadge = c.type === 'pack' ? '<span class="client-badge pack">模组包</span>' : '<span class="client-badge">客户端</span>';
+            var catBadge = c.category ? '<span class="client-badge cat">' + escapeHtml(c.category) + '</span>' : '';
+            var platformBadge = '<span class="client-badge">' + (c.platform || '') + '</span>';
+            return '<div class="client-card" data-client-id="' + c.id + '">' +
+                '<div class="client-card-top">' + iconHtml +
+                '<div class="client-title-col"><span class="client-name">' + escapeHtml(c.name || c.id) + '</span>' +
+                '<span class="client-badges">' + catBadge + typeBadge + platformBadge + '</span></div></div>' +
+                '<div class="client-note" title="' + escapeAttr(c.note || '') + '">' + escapeHtml(c.note || '') + '</div>' +
+                '<div class="client-actions">' + action + '</div></div>';
+        }
+
+        function downloadClient(id) {
+            if (clientsDownloading[id]) return;
+            clientsDownloading[id] = true;
+            filterClients();
+            if (pythonInterface && pythonInterface.downloadClient) pythonInterface.downloadClient(id);
+        }
+
+        function downloadClientWithPicker(id) {
+            var entry = null;
+            for (var i = 0; i < clientsData.length; i++) {
+                if (clientsData[i].id === id) { entry = clientsData[i]; break; }
+            }
+            if (!entry) return;
+            if (entry.strategy === 'open_page') {
+                openClientSite(entry.endpoint);
+                return;
+            }
+            if (entry.type === 'pack') {
+                // 整合包：复用版本选择器（modpacks 分支，含实例名输入）
+                openVersionPicker(id, 'modpacks', function(versionId, versionName, customName) {
+                    if (pythonInterface && pythonInterface.downloadClientVersion) {
+                        pythonInterface.downloadClientVersion(id, versionId || '', customName || '');
+                    }
+                }, entry.platform || 'modrinth');
+                return;
+            }
+            openVersionPicker(id, 'clients', function(versionId, versionName) {
+                clientsDownloading[id] = true;
+                filterClients();
+                if (pythonInterface && pythonInterface.downloadClientVersion) {
+                    pythonInterface.downloadClientVersion(id, versionId || '', '');
+                }
+            });
+        }
+
+        function openClientSite(url) {
+            if (pythonInterface && pythonInterface.openClientSite) pythonInterface.openClientSite(url);
+        }
+
+        function onClientDownloadFinished(res) {
+            if (!res || !res.id) return;
+            delete clientsDownloading[res.id];
+            if (res.ok) {
+                clientsDownloaded[res.id] = true;
+                showToast(res.message || (res.id + ' 下载完成'), 'success');
+            } else {
+                showToast(res.message || (res.id + ' 下载失败'), 'error');
+            }
+            filterClients();
+        }
+
         function switchDownloadTab(tab) {
             document.querySelectorAll('.download-tab').forEach(function(t) {
                 var isActive = t.dataset.dlTab === tab;
@@ -4080,7 +4496,11 @@
             // Auto-load trending content when tab is first opened
             if (tabLoadedFlags.hasOwnProperty(tab) && !tabLoadedFlags[tab]) {
                 tabLoadedFlags[tab] = true;
-                loadTrendingContent(tab);
+                if (tab === 'clients') {
+                    loadClients();
+                } else {
+                    loadTrendingContent(tab);
+                }
             }
             currentDlTab = tab;
             syncHeaderTags();
@@ -4392,43 +4812,185 @@
             });
         }
 
-        // === Filtered Search ===
-        function searchContentFiltered(type) {
-            var gameVersion = '';
-            var loader = '';
+        // === Mod Filter Panel (Modrinth-style) ===
+        var MF_CATEGORIES = [
+            { slug: 'adventure', name: '冒险', icon: 'static/icons/cat/adventure.svg' },
+            { slug: 'cursed', name: '诡异', icon: 'static/icons/cat/cursed.svg' },
+            { slug: 'decoration', name: '装饰', icon: 'static/icons/cat/decoration.svg' },
+            { slug: 'economy', name: '经济', icon: 'static/icons/cat/economy.svg' },
+            { slug: 'equipment', name: '装备', icon: 'static/icons/cat/equipment.svg' },
+            { slug: 'food', name: '食物', icon: 'static/icons/cat/food.svg' },
+            { slug: 'game-mechanics', name: '游戏机制', icon: 'static/icons/cat/game-mechanics.svg' },
+            { slug: 'library', name: '前置库', icon: 'static/icons/cat/library.svg' },
+            { slug: 'magic', name: '魔法', icon: 'static/icons/cat/magic.svg' },
+            { slug: 'management', name: '管理', icon: 'static/icons/cat/management.svg' },
+            { slug: 'minigame', name: '小游戏', icon: 'static/icons/cat/minigame.svg' },
+            { slug: 'mobs', name: '生物', icon: 'static/icons/cat/mobs.svg' },
+            { slug: 'optimization', name: '优化', icon: 'static/icons/cat/optimization.svg' },
+            { slug: 'social', name: '社交', icon: 'static/icons/cat/social.svg' },
+            { slug: 'storage', name: '存储', icon: 'static/icons/cat/storage.svg' },
+            { slug: 'technology', name: '科技', icon: 'static/icons/cat/technology.svg' },
+            { slug: 'transportation', name: '交通', icon: 'static/icons/cat/transportation.svg' },
+            { slug: 'utility', name: '实用', icon: 'static/icons/cat/utility.svg' },
+            { slug: 'worldgen', name: '世界生成', icon: 'static/icons/cat/worldgen.svg' }
+        ];
+        var MF_LOADERS = [
+            { slug: 'fabric', name: 'Fabric', icon: 'static/icons/loaders/fabric.png' },
+            { slug: 'forge', name: 'Forge', icon: 'static/icons/loaders/forge.png' },
+            { slug: 'neoforge', name: 'NeoForge', icon: 'static/icons/loaders/neoforge.png' },
+            { slug: 'quilt', name: 'Quilt', icon: 'static/icons/loaders/quilt.png' }
+        ];
+        var MF_ENVS = [
+            { slug: 'client', name: 'Client', icon: 'static/icons/env/client.svg' },
+            { slug: 'server', name: 'Server', icon: 'static/icons/env/server.svg' }
+        ];
+        var MF_SHOWN = { categories: 6, loaders: 4, environments: 2, versions: 8 };
+        var modFilters = { categories: [], loaders: [], environments: [], versions: [] };
+        var mfExpanded = { categories: false, loaders: false, environments: false, versions: false };
+        var mfVersionsList = [];
 
-            if (type === 'mods') {
-                gameVersion = document.getElementById('modGameVersion').value;
-                loader = document.getElementById('modLoaderFilter').value;
-            } else if (type === 'modpacks') {
-                gameVersion = document.getElementById('modpackGameVersion').value;
+        function getModFilterCsv(kind) {
+            return (modFilters[kind] || []).join(',');
+        }
+
+        function hasModFilters() {
+            return ['categories', 'loaders', 'environments', 'versions'].some(function(k) {
+                return (modFilters[k] || []).length > 0;
+            });
+        }
+
+        function toggleModFilter(kind, value) {
+            var arr = modFilters[kind];
+            if (!arr) return;
+            var idx = arr.indexOf(value);
+            if (idx >= 0) arr.splice(idx, 1); else arr.push(value);
+            renderModFilterPanel();
+            var searchInput = document.getElementById('modSearch');
+            var query = searchInput && searchInput.value ? searchInput.value.trim() : '';
+            if (hasModFilters() || query) {
+                searchContentFiltered('mods');
+            } else if (typeof loadTrendingContent === 'function') {
+                loadTrendingContent('mods');
             }
+        }
 
-            var searchInput = document.getElementById(type.replace('modpacks', 'modpack').replace('mods', 'mod').replace('datapacks', 'datapack') + 'Search');
-            if (!searchInput) return;
+        function toggleMfExpand(kind) {
+            mfExpanded[kind] = !mfExpanded[kind];
+            renderModFilterPanel();
+        }
 
-            var query = searchInput.value.trim();
-            if (!query) {
-                showToast('请输入搜索关键词', 'error');
+        function clearModFilters() {
+            ['categories', 'loaders', 'environments', 'versions'].forEach(function(k) {
+                modFilters[k] = [];
+            });
+            ['categories', 'loaders', 'environments', 'versions'].forEach(function(k) {
+                mfExpanded[k] = false;
+            });
+            renderModFilterPanel();
+            var searchInput = document.getElementById('modSearch');
+            var query = searchInput && searchInput.value ? searchInput.value.trim() : '';
+            if (query) {
+                searchContentFiltered('mods');
+            } else if (typeof loadTrendingContent === 'function') {
+                loadTrendingContent('mods');
+            }
+        }
+
+        function mfChipHtml(kind, item, active) {
+            var cls = 'mf-chip' + (active ? ' active' : '');
+            var icon = item.icon ? '<img class="mf-chip-icon" src="' + item.icon + '" alt="" onerror="this.style.display=\'none\'">' : '';
+            return '<div class="' + cls + '" data-mf-kind="' + kind + '" data-mf-value="' + item.slug + '" onclick="toggleModFilter(\'' + kind + '\',\'' + item.slug + '\')">' + icon + '<span>' + item.name + '</span></div>';
+        }
+
+        function mfRenderList(listId, kind, items) {
+            var container = document.getElementById(listId);
+            if (!container) return;
+            var limit = items.length;
+            if (!mfExpanded[kind]) limit = Math.min(MF_SHOWN[kind], items.length);
+            var html = '';
+            for (var i = 0; i < limit; i++) {
+                var obj = typeof items[i] === 'string' ? { slug: items[i], name: items[i], icon: '' } : items[i];
+                html += mfChipHtml(kind, obj, modFilters[kind].indexOf(obj.slug) >= 0);
+            }
+            container.innerHTML = html;
+        }
+
+        function mfRenderMore(moreId, kind, total) {
+            var btn = document.getElementById(moreId);
+            if (!btn) return;
+            if (total <= MF_SHOWN[kind]) {
+                btn.style.display = 'none';
+                btn.innerHTML = '';
                 return;
             }
+            btn.style.display = '';
+            btn.innerHTML = mfExpanded[kind] ? '▲ 收起' : ('▼ 查看剩余 ' + (total - MF_SHOWN[kind]) + ' 项');
+        }
 
-            // Show loading spinner in results container
+        function renderModFilterPanel() {
+            mfRenderList('mfCatList', 'categories', MF_CATEGORIES);
+            mfRenderMore('mfCatMore', 'categories', MF_CATEGORIES.length);
+            mfRenderList('mfLoaderList', 'loaders', MF_LOADERS);
+            mfRenderMore('mfLoaderMore', 'loaders', MF_LOADERS.length);
+            mfRenderList('mfEnvList', 'environments', MF_ENVS);
+            mfRenderList('mfVersionList', 'versions', mfVersionsList);
+            mfRenderMore('mfVersionMore', 'versions', mfVersionsList.length);
+        }
+
+        // === Filtered Search ===
+        function searchContentFiltered(type) {
             var activeTab = document.querySelector('.download-tab.active');
-            if (activeTab) {
-                var tabType = activeTab.dataset.dlTab;
-                var resultsContainer = document.getElementById(tabType + 'Results');
+
+            function showSpinner(containerId) {
+                var resultsContainer = document.getElementById(containerId);
                 if (resultsContainer) {
                     resultsContainer.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px;"><div class="spinner-icon" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border-color);border-top-color:var(--accent-color);border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:8px;"></div><div>搜索中...</div></div>';
                 }
             }
 
-            var source = getCurrentSource(type);
-            console.log('[JS] searchContentFiltered:', type, query, gameVersion, loader, source);
+            if (type === 'mods') {
+                var searchInput = document.getElementById('modSearch');
+                var query = searchInput && searchInput.value ? searchInput.value.trim() : '';
+                if (!query && !hasModFilters()) {
+                    showToast('请输入搜索关键词', 'error');
+                    return;
+                }
+                if (activeTab && activeTab.dataset.dlTab === 'mods') showSpinner('modsResults');
+                var source = getCurrentSource('mods');
+                console.log('[JS] searchMods:', query, getModFilterCsv('versions'), getModFilterCsv('loaders'), getModFilterCsv('categories'), getModFilterCsv('environments'), source);
+                if (pythonInterface && pythonInterface.searchMods) {
+                    pythonInterface.searchMods(query, getModFilterCsv('versions'), getModFilterCsv('loaders'), getModFilterCsv('categories'), getModFilterCsv('environments'), source);
+                } else if (pythonInterface && pythonInterface.searchContentFiltered) {
+                    pythonInterface.searchContentFiltered(query, 'mods', getModFilterCsv('versions'), getModFilterCsv('loaders'), source);
+                }
+                return;
+            }
+
+            var gameVersion = '';
+            if (type === 'modpacks') {
+                gameVersion = document.getElementById('modpackGameVersion').value;
+            }
+
+            var searchInput2 = document.getElementById(type.replace('modpacks', 'modpack').replace('mods', 'mod').replace('datapacks', 'datapack') + 'Search');
+            if (!searchInput2) return;
+
+            var query2 = searchInput2.value.trim();
+            if (!query2) {
+                showToast('请输入搜索关键词', 'error');
+                return;
+            }
+
+            // Show loading spinner in results container
+            if (activeTab) {
+                showSpinner(activeTab.dataset.dlTab + 'Results');
+            }
+
+            var source2 = getCurrentSource(type);
+            console.log('[JS] searchContentFiltered:', type, query2, gameVersion, source2);
             if (pythonInterface && pythonInterface.searchContentFiltered) {
-                pythonInterface.searchContentFiltered(query, type, gameVersion || '', loader || '', source);
+                pythonInterface.searchContentFiltered(query2, type, gameVersion || '', '', source2);
             } else if (pythonInterface && pythonInterface.searchContent) {
-                pythonInterface.searchContent(query, type);
+                pythonInterface.searchContent(query2, type);
             }
         }
 
@@ -4457,7 +5019,9 @@
             document.getElementById('pickerGameVersion').value = '';
             document.getElementById('pickerLoader').value = '';
 
-            if (contentType === 'modpacks' && pythonInterface && pythonInterface.getModpackVersions) {
+            if (contentType === 'clients' && pythonInterface && pythonInterface.getClientVersions) {
+                pythonInterface.getClientVersions(contentId);
+            } else if (contentType === 'modpacks' && pythonInterface && pythonInterface.getModpackVersions) {
                 pythonInterface.getModpackVersions(contentId, source || 'modrinth');
             } else if (pythonInterface && pythonInterface.getModVersions) {
                 pythonInterface.getModVersions(contentId, '');

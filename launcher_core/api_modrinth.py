@@ -27,6 +27,40 @@ LOADER_NAME_MAP = {
 }
 
 
+# Modrinth search 的环境过滤用 client_side/server_side facet（非 categories:client，
+# 实测 categories:client 恒为 0）。chip 值 client/server → 支持端 required+optional 组内 OR。
+ENV_FACETS = {
+    "client": ["client_side:required", "client_side:optional"],
+    "server": ["server_side:required", "server_side:optional"],
+}
+
+
+def build_facets(
+    project_type: str = "mods",
+    versions: Optional[list] = None,
+    loaders: Optional[list] = None,
+    categories: Optional[list] = None,
+    environments: Optional[list] = None,
+) -> list:
+    """构建 Modrinth facets：子数组内 OR、子数组间 AND。
+
+    loaders/categories 是 categories: slug 各自独立成组；
+    environments 走 client_side/server_side（每端一组，多选端间 AND）。
+    """
+    facets = [list(group) for group in PROJECT_TYPES.get(project_type, [["project_type:mod"]])]
+    if versions:
+        facets.append(["versions:" + v for v in versions])
+    if loaders:
+        facets.append(["categories:" + l for l in loaders])
+    if categories:
+        facets.append(["categories:" + c for c in categories])
+    for env in environments or []:
+        group = ENV_FACETS.get(env)
+        if group:
+            facets.append(list(group))
+    return facets
+
+
 class ModrinthAPI:
     """Modrinth API wrapper"""
 
@@ -106,18 +140,12 @@ class ModrinthAPI:
         offset: int = 0,
         limit: int = 20,
         versions: Optional[list] = None,
-        loaders: Optional[list] = None
+        loaders: Optional[list] = None,
+        categories: Optional[list] = None,
+        environments: Optional[list] = None
     ) -> dict:
-        """Search for projects with optional version/loader filtering"""
-        facets = PROJECT_TYPES.get(project_type, [["project_type:mod"]]).copy()
-
-        if versions:
-            version_facets = [["versions:" + v] for v in versions]
-            facets.append(version_facets)
-
-        if loaders:
-            loader_facets = [["categories:" + l] for l in loaders]
-            facets.append(loader_facets)
+        """Search for projects with optional version/loader/category filtering"""
+        facets = build_facets(project_type, versions, loaders, categories, environments)
 
         params = {
             "index": index,
