@@ -8,7 +8,7 @@ dist/
 build/
 .venv/
 venv/
-env/
+/env/
 .minecraft/
 *.log
 .idea/
@@ -16,6 +16,8 @@ env/
 *.zip
 *.jar
 *.png
+# 图标必须随包离线（*.png/env/ 规则会误伤 loaders/草方块/env 段图标）
+!ui/static/icons/**
 download_err.txt
 download_log.txt
 test_bg.py
