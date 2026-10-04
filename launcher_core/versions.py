@@ -91,7 +91,13 @@ class VersionManager:
         (inheritsFrom). Vanilla versions auto-downloaded as modpack
         dependencies are hidden: they have neither, and the modpack entry
         that needs them is listed instead.
+
+        Each entry carries ``loaders`` (detected via inheritsFrom chain,
+        same source as the mod-loader detail page) so the UI can show the
+        correct loader badge/icon for modpack ids without ``-Fabric-``.
         """
+        from .api_modloaders import get_installed_loaders as _detect_loaders
+
         versions = []
         versions_dir = Path(self.minecraft_dir) / "versions"
         if not versions_dir.exists():
@@ -121,7 +127,8 @@ class VersionManager:
                 "type": version_data.get("type", "unknown"),
                 "releaseTime": version_data.get("releaseTime", ""),
                 "inheritsFrom": inherits_from,
-                "has_cfg": has_cfg
+                "has_cfg": has_cfg,
+                "loaders": _detect_loaders(str(json_file)),
             })
 
         return versions
