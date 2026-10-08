@@ -14,20 +14,26 @@ def test_default_flags_contain_gpu_savings():
         assert flag in WEBENGINE_CHROMIUM_FLAGS, flag
 
 
-def test_merge_when_unset_or_empty():
+def test_merge_when_unset_or_empty(monkeypatch):
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy"):
+        monkeypatch.delenv(k, raising=False)
     assert merge_chromium_flags(None) == WEBENGINE_CHROMIUM_FLAGS
     assert merge_chromium_flags("") == WEBENGINE_CHROMIUM_FLAGS
     assert merge_chromium_flags("   ") == WEBENGINE_CHROMIUM_FLAGS
 
 
-def test_merge_preserves_user_flags():
+def test_merge_preserves_user_flags(monkeypatch):
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy"):
+        monkeypatch.delenv(k, raising=False)
     out = merge_chromium_flags("--enable-logging --log-level=3")
     assert "--enable-logging" in out
     assert "--disable-gpu" in out
     assert out.startswith("--enable-logging")
 
 
-def test_merge_idempotent_when_already_present():
+def test_merge_idempotent_when_already_present(monkeypatch):
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy"):
+        monkeypatch.delenv(k, raising=False)
     once = merge_chromium_flags("--enable-logging")
     assert merge_chromium_flags(once) == once
 

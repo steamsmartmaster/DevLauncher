@@ -28,7 +28,7 @@ def test_version_info_resource():
     vf = REPO_ROOT / "version_info.txt"
     assert vf.exists(), "缺少 version_info.txt"
     text = vf.read_text(encoding="utf-8")
-    assert "FileVersion" in text and "1.1.0.0" in text
+    assert "FileVersion" in text and "1.1.5.0" in text
     assert "ProductName" in text and "DevLauncher" in text
     assert "OriginalFilename" in text and "DevLauncher.exe" in text
 

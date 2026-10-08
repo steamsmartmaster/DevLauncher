@@ -19,6 +19,7 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = merge_chromium_flags(
 from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PyQt6.QtCore import QUrl, pyqtSlot, QObject, pyqtSignal, QTimer
 from PyQt6.QtWebChannel import QWebChannel
 
@@ -40,6 +41,7 @@ from launcher_core.api_modloaders import (
     get_installed_loaders, ModLoaderVersion
 )
 from launcher_core.modpack_importer import ModpackImporter, ModpackInfo
+from launcher_core.mod_manager import remove_stale_client_mods
 
 
 # === 日志配置 ===
@@ -158,6 +160,8 @@ class LauncherBridge(QObject):
         self._game_monitor_timer = QTimer()
         self._game_monitor_timer.timeout.connect(self._check_game_process)
         self._current_mod_version = ""
+        self._web_jar_pending: dict = {}
+        self._client_web_win = None
         self._mod_sched = ModLoadScheduler()
         # Thread-safe queue for auth callback from HTTP server
         self._auth_callback_queue = queue.Queue()
@@ -1392,6 +1396,12 @@ class LauncherBridge(QObject):
         if entry["strategy"] == "open_page":
             self.errorOccurred.emit(f"{entry['name']} 无下载 API，请使用「打开页面」")
             return
+        if entry["strategy"] == "web_download":
+            pending = self._web_jar_pending
+            self._web_jar_pending = {}
+            if not pending.get("url") or version_id != pending.get("url"):
+                self.errorOccurred.emit(f"{entry['name']}：缺少网页下载直链，请从卡片「下载」打开页面")
+                return
         if entry["strategy"] == "modrinth_modpack":
             # 复用整合包下载+自动安装管线（含自定义实例名）
             self.downloadModpackVersion(entry["endpoint"], version_id or "", "modrinth", custom_name)
@@ -1402,7 +1412,12 @@ class LauncherBridge(QObject):
             self.clientDownloadFinished.emit(json.dumps(
                 {"id": client_id, "ok": ok, "message": message}, ensure_ascii=False))
 
+        def _import_complete(payload: dict):
+            # 永不漏发：导入弹窗靠 complete 信号解锁
+            self.modpackImportComplete.emit(json.dumps(payload, ensure_ascii=False))
+
         def _do_download():
+            picked_meta = {"game_versions": [], "loaders": []}
             try:
                 strategy = entry["strategy"]
                 url, filename = None, None
@@ -1411,11 +1426,18 @@ class LauncherBridge(QObject):
                     if not jar:
                         raise RuntimeError("Meteor 下载 API 无响应")
                     url, filename = jar["url"], jar["filename"]
+                    picked_meta = {"game_versions": [version_id] if version_id else [],
+                                   "loaders": ["fabric"]}
                 elif strategy == "github_latest_jar":
                     if version_id.startswith("http"):
                         # 版本列表 id = 资产直链
                         url = version_id
                         filename = os.path.basename(urlparse(url).path) or f"{entry['id']}.jar"
+                        items = clients_catalog.format_github_release_items(
+                            github_api.get_releases(entry["endpoint"]))
+                        hit = next((it for it in items if it["id"] == version_id), None)
+                        picked_meta = {"game_versions": (hit or {}).get("game_versions") or [],
+                                       "loaders": []}
                     else:
                         release = github_api.get_latest_release(entry["endpoint"])
                         if not release:
@@ -1424,17 +1446,25 @@ class LauncherBridge(QObject):
                         if not asset:
                             raise RuntimeError(f"最新 release 无可下载 jar: {entry['endpoint']}")
                         url, filename = asset["url"], asset["filename"]
+                        picked_meta = {"game_versions":
+                                       [clients_catalog.parse_mc_version(asset["filename"])],
+                                       "loaders": []}
                 elif strategy == "modrinth_latest_jar":
                     if version_id:
                         version = modrinth_api.get_version(version_id)
                         if not version:
                             raise RuntimeError(f"Modrinth 版本不存在: {version_id}")
                         picked = clients_catalog.pick_modrinth_file(version)
+                        picked_meta = {"game_versions": version.get("game_versions") or [],
+                                       "loaders": version.get("loaders") or []}
                     else:
                         versions = modrinth_api.get_project_versions(entry["endpoint"])
                         if not versions:
                             raise RuntimeError(f"Modrinth 无可用版本: {entry['endpoint']}")
-                        picked = clients_catalog.pick_modrinth_file(versions[0])
+                        target = versions[0]
+                        picked = clients_catalog.pick_modrinth_file(target)
+                        picked_meta = {"game_versions": target.get("game_versions") or [],
+                                       "loaders": target.get("loaders") or []}
                     if not picked:
                         raise RuntimeError(f"该版本无可下载 jar: {entry['endpoint']}")
                     url, filename = picked["url"], picked["filename"]
@@ -1457,27 +1487,91 @@ class LauncherBridge(QObject):
                            or f"https://edge.forgecdn.net/files/{file_info.get('id', '')}")
                     filename = (file_info.get("fileName")
                                 or f"{entry['id']}-{file_info.get('id', '')}.jar")
+                    picked_meta = {"game_versions": file_info.get("gameVersions") or [],
+                                   "loaders": []}
+                elif strategy == "web_download":
+                    url = pending["url"]
+                    filename = (pending.get("filename")
+                                or os.path.basename(urlparse(url).path)
+                                or f"{entry['id']}.jar")
+                    picked_meta = {"game_versions": [], "loaders": []}
                 else:
                     raise RuntimeError(f"未知 strategy: {strategy}")
 
-                # 落盘目录：与现行规则同源（选中且隔离 → 隔离 mods）
-                current = self._current_mod_version
-                isolated = bool(current) and self.versions.is_version_isolated(current)
-                dest_dir = clients_catalog.client_dest_dir(
-                    self.settings.get("minecraft_dir"),
-                    current,
-                    isolated,
-                    self.versions.get_mods_path(current) if isolated else None,
-                )
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                dest_path = dest_dir / filename
-                if not modrinth_api.download_file(url, str(dest_path)):
+                # MC 版本回退链：条目标注 → 当前选中 → Mojang 最新正式版
+                candidates = list(picked_meta.get("game_versions") or [])
+                mv = clients_catalog.parse_mc_version(filename)
+                if mv:
+                    candidates.append(mv)
+                latest_release = ""
+                if minecraft_launcher_lib is not None:
+                    try:
+                        latest_release = minecraft_launcher_lib.utils.get_latest_version().get("release", "")
+                    except Exception:
+                        latest_release = ""
+                mc_version = clients_catalog.resolve_client_mc_version(
+                    candidates, self._current_mod_version, latest_release)
+                if not mc_version:
+                    raise RuntimeError("无法确定 Minecraft 版本（条目未标注，且当前版本/最新版不可用）")
+                loader = next((l for l in (picked_meta.get("loaders") or [])
+                               if l in ("fabric", "forge", "neoforge", "quilt")), "fabric")
+                rec = get_recommended_loaders(mc_version)
+                if loader not in rec:
+                    raise RuntimeError(f"无法获取 {loader} 推荐版本（MC {mc_version}）")
+                loader_version = rec[loader].loader_version
+                instance_name = (custom_name or "").strip() or entry["name"]
+
+                def report(current, total, message, file_downloaded=0,
+                           file_total=0, file_states=None):
+                    self.modpackImportProgress.emit(json.dumps({
+                        "current": current, "total": total, "message": message,
+                        "file_downloaded": file_downloaded, "file_total": file_total,
+                        "files": file_states or []
+                    }, ensure_ascii=False))
+                    button_detail = json.dumps({
+                        "message": message,
+                        "button_text": f"正在安装 {instance_name}",
+                        "file_downloaded": file_downloaded,
+                        "file_total": file_total,
+                        "files": file_states or []
+                    })
+                    self.gameStateChanged.emit("installing", button_detail)
+
+                report(0, 100, f"正在创建实例 {instance_name}（{mc_version} + {loader}）...")
+                minecraft_dir = Path(self.settings.get("minecraft_dir"))
+                importer = ModpackImporter(minecraft_dir)
+                installed = importer.install_client_instance(
+                    instance_name, mc_version, loader, loader_version, report)
+
+                report(88, 100, f"正在下载 {filename}...")
+                dest = minecraft_dir / "versions" / instance_name / "mods" / filename
+                dest.parent.mkdir(parents=True, exist_ok=True)
+
+                def dl_cb(p):
+                    # 88→100 单调推进，避免进度条回跳
+                    report(int(88 + (p or 0) * 12), 100, f"正在下载 {filename}...")
+
+                if not modrinth_api.download_file(url, str(dest), callback=dl_cb):
                     raise RuntimeError(f"文件下载失败: {url}")
-                logger.info(f"客户端条目已保存: {dest_path}")
-                _finish(True, f"已保存 {filename}")
+                removed = remove_stale_client_mods(dest)
+                if removed:
+                    logger.info(f"同 mod 旧版本已清理: {removed}")
+                logger.info(f"客户端实例已安装: {instance_name} <- {dest}")
+
+                result = {"success": True, "version_name": instance_name,
+                          "downloaded": 1, "total": 1, "errors": []}
+                if installed.get("warning"):
+                    result["warning"] = installed["warning"]
+                _import_complete(result)
+                _finish(True, f"已安装到实例 {instance_name}（{filename}）")
+                self.getVersions()
+                self.loadMods(instance_name)
+                self.gameStateChanged.emit("idle", "")
             except Exception as e:
                 logger.error(f"下载客户端条目失败: {e}", exc_info=True)
+                _import_complete({"success": False, "error": str(e)})
                 _finish(False, str(e))
+                self.gameStateChanged.emit("idle", "")
 
         threading.Thread(target=_do_download, daemon=True).start()
 
@@ -1489,6 +1583,32 @@ class LauncherBridge(QObject):
             return
         logger.info(f"打开客户端页面: {url}")
         webbrowser.open(url)
+
+    @pyqtSlot(str)
+    def openClientWebPage(self, client_id: str):
+        """web_download 条目：启动器内开网页选版本（不走外部浏览器）"""
+        entry = clients_catalog.get_entry(client_id)
+        if not entry or entry.get("strategy") != "web_download":
+            self.errorOccurred.emit(f"该条目不支持内置网页下载: {client_id}")
+            return
+        self._client_web_win = ClientWebWindow(
+            self, client_id, entry["endpoint"], entry["name"])
+        self._client_web_win.show()
+        self._client_web_win.raise_()
+        self._client_web_win.activateWindow()
+        logger.info(f"内置网页下载窗口: {client_id} <- {entry['endpoint']}")
+
+    def startWebClientDownload(self, client_id: str, url: str, filename: str = ""):
+        """网页窗口捕获的 .jar 直链 → 复用 downloadClientVersion 安装管线"""
+        entry = clients_catalog.get_entry(client_id)
+        if not entry or entry.get("strategy") != "web_download":
+            return
+        if not url.startswith("http"):
+            self.errorOccurred.emit(f"非法下载直链: {url}")
+            return
+        logger.info(f"接管网页 jar 下载: {client_id} <- {url}")
+        self._web_jar_pending = {"url": url, "filename": filename or ""}
+        self.downloadClientVersion(client_id, url, "")
 
     @pyqtSlot(str, str)
     def downloadContent(self, content_id: str, content_type: str):
@@ -2378,6 +2498,56 @@ class LauncherBridge(QObject):
                 'isOffline': False,
                 'silent': bool(silent)
             }, ensure_ascii=False))
+
+
+class ClientWebPage(QWebEnginePage):
+    """内置下载页：.jar 直链导航不交给页面，改发信号由窗口接管"""
+
+    jarLinkDetected = pyqtSignal(str)
+
+    def acceptNavigationRequest(self, url: QUrl, nav_type, is_main_frame: bool) -> bool:
+        if url.url().split("?")[0].lower().endswith(".jar"):
+            self.jarLinkDetected.emit(url.url())
+            return False
+        return super().acceptNavigationRequest(url, nav_type, is_main_frame)
+
+
+class ClientWebWindow(QMainWindow):
+    """web_download 条目的站内选版本网页窗口（独立 off-the-record profile）。
+
+    页面发起的 .jar 下载 → 取消 Chromium 下载项 → startWebClientDownload
+    复用客户端安装管线 → 关闭窗口；非 .jar 下载一律取消。
+    """
+
+    def __init__(self, bridge, client_id: str, url: str, title: str = ""):
+        super().__init__()
+        self._bridge = bridge
+        self._client_id = client_id
+        self.setWindowTitle(f"{title or client_id} - 下载")
+        self.resize(1100, 760)
+        self._profile = QWebEngineProfile(self)
+        self._page = ClientWebPage(self._profile, self)
+        self._page.jarLinkDetected.connect(self._on_jar_link)
+        self._profile.downloadRequested.connect(self._on_download_requested)
+        self._view = QWebEngineView(self)
+        self._view.setPage(self._page)
+        self.setCentralWidget(self._view)
+        self._view.setUrl(QUrl(url))
+
+    def _on_jar_link(self, url: str):
+        self._handoff(url, "")
+
+    def _on_download_requested(self, download):
+        url = download.url().url()
+        is_jar = url.split("?")[0].lower().endswith(".jar")
+        suggested = download.suggestedFilename() or os.path.basename(urlparse(url).path)
+        download.cancel()
+        if is_jar:
+            self._handoff(url, suggested)
+
+    def _handoff(self, url: str, filename: str):
+        self._bridge.startWebClientDownload(self._client_id, url, filename)
+        self.close()
 
 
 class MainWindow(QMainWindow):

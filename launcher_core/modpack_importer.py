@@ -1354,6 +1354,27 @@ class ModpackImporter:
             logger.exception(f"{display} 安装失败: {e}")
             return f"{display} 安装失败: {e}"
 
+    def install_client_instance(self, instance_name: str, mc_version: str,
+                                loader: str, loader_version: str, report) -> dict:
+        """为客户端条目创建隔离实例（复用整合包导入四件套）。
+
+        目录与隔离先建（同名幂等复用），随后：原版确保 → 版本 JSON →
+        Forge 系安装合并。返回 {"version_name", "warning"}；失败向上抛出。
+        """
+        version_dir = self.minecraft_dir / "versions" / instance_name
+        version_dir.mkdir(parents=True, exist_ok=True)
+        (version_dir / "mods").mkdir(exist_ok=True)
+
+        from launcher_core.versions import VersionManager
+        VersionManager(str(self.minecraft_dir)).enable_version_isolation(instance_name)
+
+        report(90, 100, f"准备实例 {instance_name}（{mc_version} + {loader}）...")
+        self._ensure_vanilla_version(mc_version, report)
+        self._create_version_json(version_dir, instance_name, mc_version, loader, loader_version)
+        warning = self._install_loader_for_import(instance_name, loader, loader_version, report)
+        logger.info(f"客户端实例就绪: {instance_name} (MC {mc_version}, {loader} {loader_version})")
+        return {"version_name": instance_name, "warning": warning}
+
 
 # Singleton
 def get_importer(minecraft_dir: Path) -> ModpackImporter:

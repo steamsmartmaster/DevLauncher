@@ -1,10 +1,13 @@
-"""客户端目录 launcher_core/clients_catalog.py（19 条 = 13 client + 6 pack）+ 解析助手"""
+"""客户端目录 launcher_core/clients_catalog.py（20 条 = 14 client + 6 pack）+ 解析助手"""
+from pathlib import Path
+
 import pytest
 
 from launcher_core import clients_catalog as cc
 
 STRATEGIES = {"github_latest_jar", "modrinth_latest_jar", "meteor_download",
-              "modrinth_modpack", "curseforge_search_jar", "open_page"}
+              "modrinth_modpack", "curseforge_search_jar", "open_page",
+              "web_download"}
 PLATFORMS = {"github", "modrinth", "curseforge", "web"}
 KINDS = {"jar", "modpack", "page"}
 CATEGORIES = {"作弊-综合", "作弊-辅助", "作弊-PVP", "PVP-竞技", "PVP-辅助"}
@@ -12,9 +15,9 @@ FIELDS = ("id", "name", "type", "category", "platform", "endpoint",
           "strategy", "note", "kind", "icon")
 
 
-def test_catalog_schema_19_entries():
+def test_catalog_schema_20_entries():
     items = cc.get_catalog()
-    assert len(items) == 19
+    assert len(items) == 20
     ids = [i["id"] for i in items]
     assert len(set(ids)) == len(ids), "id 应唯一"
     for i in items:
@@ -25,9 +28,10 @@ def test_catalog_schema_19_entries():
         assert i["type"] in ("client", "pack"), i["type"]
         assert i["kind"] in KINDS, i["kind"]
         assert isinstance(i["icon"], str), i["id"]
-        assert i["icon"] == "" or i["icon"].startswith("http"), i["icon"]
-        # endpoint 形态随 strategy：open_page/meteor_download=完整URL；github=owner/repo；其余=slug/搜索词
-        if i["strategy"] in ("open_page", "meteor_download"):
+        # 图标本地化（QtWebEngine 无代理直连时 GitHub 外链超时）：仅允许 本地路径 或 空
+        assert i["icon"] == "" or i["icon"].startswith("static/icons/clients/"), i["icon"]
+        # endpoint 形态随 strategy：open_page/meteor_download/web_download=完整URL；github=owner/repo；其余=slug/搜索词
+        if i["strategy"] in ("open_page", "meteor_download", "web_download"):
             assert i["endpoint"].startswith("http"), i["endpoint"]
         elif i["strategy"] == "github_latest_jar":
             assert "/" in i["endpoint"] and not i["endpoint"].startswith("http"), i["endpoint"]
@@ -35,18 +39,27 @@ def test_catalog_schema_19_entries():
             assert i["endpoint"] and not i["endpoint"].startswith("http"), i["endpoint"]
 
 
-def test_catalog_composition_13_clients_6_packs():
+def test_catalog_composition_14_clients_6_packs():
     items = cc.get_catalog()
     clients = [i for i in items if i["type"] == "client"]
     packs = [i for i in items if i["type"] == "pack"]
-    assert len(clients) == 13
+    assert len(clients) == 14
     assert len(packs) == 6
-    # 6 种 strategy / 4 种 platform 全覆盖
+    # 7 种 strategy / 4 种 platform 全覆盖
     assert {i["strategy"] for i in items} == STRATEGIES
     assert {i["platform"] for i in items} == PLATFORMS
     by_id = {i["id"]: i for i in items}
 
-    # ---- 13 客户端 ----
+    # ---- LiquidBounce：内置网页下载（web_download）----
+    lb = by_id["liquidbounce"]
+    assert lb["strategy"] == "web_download"
+    assert lb["endpoint"] == "https://liquidbounce.net/download"
+    assert lb["type"] == "client" and lb["kind"] == "jar"
+    assert lb["platform"] == "web"
+    assert lb["category"] == "作弊-PVP"
+    assert lb["icon"].startswith("static/icons/clients/liquidbounce")
+
+    # ---- 14 客户端 ----
     assert by_id["meteor"]["strategy"] == "meteor_download"
     assert by_id["meteor"]["endpoint"] == "https://meteorclient.com/api/download"
     for gid in ("bleachhack", "fpsmaster", "combatant", "travel", "mastermind"):
@@ -246,3 +259,46 @@ def test_client_dest_dir_branches(tmp_path):
     # 无选中版本 → 全局（忽略隔离路径）
     assert cc.client_dest_dir(str(tmp_path), current_version="",
                               is_isolated=True, isolated_mods_path=str(iso)) == tmp_path / "mods"
+
+
+def test_strict_and_resolve_client_mc_version():
+    # 严格校验：完整 id 形状才算 MC 版本（实例名带数字不误判）
+    assert cc.strict_mc_version("1.21.11") == "1.21.11"
+    assert cc.strict_mc_version("26.3") == "26.3"
+    assert cc.strict_mc_version("26.4-snapshot-2") == "26.4-snapshot-2"
+    assert cc.strict_mc_version("Meteor Client 26") == ""
+    assert cc.strict_mc_version("My-1.21-Pack") == ""
+    assert cc.strict_mc_version("") == ""
+
+
+def test_resolve_client_mc_version_chain():
+    # 条目标注 → 当前选中（严格）→ 最新正式版；全部不可用返回 ""
+    assert cc.resolve_client_mc_version(["1.21.11", "26.3"], "26.1", "26.4") == "1.21.11"
+    assert cc.resolve_client_mc_version([], "26.3", "26.4") == "26.3"
+    assert cc.resolve_client_mc_version([], "Meteor Client", "26.4") == "26.4"
+    assert cc.resolve_client_mc_version(["Fabric", "OptiFine"], "", "") == ""
+    assert cc.resolve_client_mc_version(["24w14a", "1.21.9"], "", "") == "1.21.9"  # 快照 id 跳过
+    assert cc.resolve_client_mc_version([], "", "") == ""
+
+
+def test_client_icons_localized_and_exist():
+    # 应用内 QtWebEngine 无代理直连：GitHub 头像外链超时 → 必须本地化入库
+    root = Path(__file__).resolve().parents[1]
+    icons_dir = root / "ui" / "static" / "icons" / "clients"
+    referenced = set()
+    for e in cc.get_catalog():
+        icon = e.get("icon") or ""
+        if not icon:
+            continue  # 允许个别条目无图标（字母兜底）
+        assert not icon.startswith("http"), f"{e['id']} 图标仍为外链: {icon}"
+        assert icon.startswith("static/icons/clients/"), \
+            f"{e['id']} 图标应为 static/icons/clients/..., 实际 {icon}"
+        f = root / "ui" / icon
+        assert f.is_file() and f.stat().st_size > 0, f"图标文件缺失或为空: {f}"
+        assert f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".svg"), \
+            f"不支持的图标格式: {f}"
+        referenced.add(f.name)
+    assert referenced, "目录应有已本地化的图标"
+    on_disk = {p.name for p in icons_dir.glob("*") if p.is_file()}
+    assert referenced == on_disk, \
+        f"孤儿文件 {on_disk - referenced or '无'} / 盘上缺失 {referenced - on_disk or '无'}"

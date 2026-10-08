@@ -288,6 +288,48 @@ class ModInfo:
         }
 
 
+def remove_stale_client_mods(new_jar) -> list[str]:
+    """Remove other jars in the same directory sharing new_jar's mod_id.
+
+    Re-downloading one client into the same default instance used to
+    accumulate jars (meteor-client-1.21.5-54.jar beside
+    meteor-client-1.21.6-7.jar) and the mods list showed duplicates.
+    Returns the filenames that were deleted.
+    """
+    removed: list[str] = []
+    if not new_jar:
+        return removed
+    new_jar = Path(new_jar)
+    if new_jar.suffix != ".jar" or not new_jar.exists():
+        return removed
+    try:
+        new_info = ModInfo(str(new_jar))
+    except Exception:
+        return removed
+    if not new_info.mod_id:
+        return removed
+    try:
+        siblings = sorted(new_jar.parent.iterdir())
+    except OSError:
+        return removed
+    for other in siblings:
+        if other == new_jar or not other.is_file() or other.suffix != ".jar":
+            continue
+        try:
+            other_info = ModInfo(str(other))
+        except Exception:
+            continue
+        if not other_info.mod_id or other_info.mod_id != new_info.mod_id:
+            continue
+        try:
+            other.unlink()
+            removed.append(other.name)
+            logger.info(f"移除同 mod 旧版本: {other.name} (mod_id={new_info.mod_id})")
+        except OSError as e:
+            logger.warning(f"移除旧版本失败: {other}: {e}")
+    return removed
+
+
 class ModManager:
     """Manage mods in a .minecraft/mods directory"""
     

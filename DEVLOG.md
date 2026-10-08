@@ -346,3 +346,53 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - **目录端点全部代理实测**：4 仓库无任何 GitHub Release（wurst→wurstclient.net、ares→aresclient.org、payload→仓库页、meteor→官网 API）；GitHub latest×5 可用；Modrinth 8 slug（`pvp_perfect` 下划线、`macepvp+` 含 + 均直接可通，5 包主文件均 `.mrpack`）；CF `search_mods("AxolotlClient")` 1 命中 13 files（图标在 `logo.url`）；`/archive` 8 版本；18 个 icon URL 全 200
 
 **验证**：红→绿 TDD —— `tests/test_clients_catalog.py` 重写 RED 6F/6P → GREEN；`tests/test_api_meteor.py` 新建 RED ImportError → 合计 **19 passed**（schema 19 条/13+6 组成/归一/updated_at 挑选/`parse_mc_version`/`github_releases_url` 尾斜杠回归/静态断言 get_releases 用归一 URL）；`tests/test_clients_ui.js` 重写 RED 36F/17P → GREEN **95/0**（19 卡渲染/新排版/分类搜索「作弊」3 命中/picker 双分支/open_page 安全分支/main.py 槽静态；测试桩两轮修缮：白名单补 `escapeHtml`/`escapeAttr`、createElement 模拟 textContent→innerHTML 转义）；全套回归 pytest **144** + JS 8 套 128/95/71/82/196/11/61/22=**666** 全 0 FAIL + `py_compile` + 提取 `<script>` `node --check`；**网络冒烟（代理）ALL PASS**：`get_releases`×5（BleachHack 30 releases/75 items）、Modrinth 8 slug、CF search+files、Meteor archive 8 + `get_jar` 三态（裸→`meteor-client-26.2-32.jar`、`1.21.11`→`-1.21.11-86.jar`、无效→回退最新）、18 icon 全 200
+
+### 客户端下载升级为完整实例安装（MC+加载器+jar 进隔离实例，2026-10-04）
+
+**需求**：用户 4 问确认 —— jar 客户端「下载」不再只落 mods，而是**自动下载 MC 版本 + 加载器 + jar，全部装进新建隔离实例**（可直接在版本页启动）；选版本弹层**带实例名输入框，默认=客户端名**；MC/加载器跟随所选条目 `game_versions[0]`/`loaders[0]`（加载器空默认 fabric；无 MC 版本 → 当前选中**须严格形如 MC id** → Mojang 最新正式版）；卡片按钮**不永久锁死**（仅临时「下载中…」，完成回「下载」可重复下，与模组卡片一致）；**始终**新建/复用同名隔离实例，不并入当前选中。方案 A：复用整合包导入器 + HMCL 导入弹窗进度（设计/计划文档见 `docs/plans/2026-10-04-client-instance-install-*.md`）
+
+**实现**：
+- `launcher_core/clients_catalog.py`：新 `strict_mc_version()`（严格 id 形状 `x.y[.z]` / `x.y-snapshot[-n]`，实例名/含杂质字符串不误判）+ `resolve_client_mc_version(game_versions, current, latest)` 回退链（快照 id 如 24w14a 跳过）
+- `launcher_core/modpack_importer.py`：新 `install_client_instance(name, mc, loader, lv, report)` —— `versions/<名>/`+mods 先建（同名幂等）→ `VersionManager.enable_version_isolation` → `_ensure_vanilla_version` → `_create_version_json` → `_install_loader_for_import`，返回 `{version_name, warning}`，任一步失败向上抛
+- `main.py` `downloadClientVersion` 编排改造：六 strategy 解析时同步填 `picked_meta`（github 直链回查 release 条目 game_versions、latest 解析文件名；modrinth version 字典；CF `fileInfo.gameVersions`；meteor `[version_id]`+`["fabric"]`）→ candidates+文件名解析走回退链（`minecraft_launcher_lib.utils.get_latest_version()` 离线容错 `""`）→ `get_recommended_loaders(mc)` 取 loader 版本（缺→报错）→ 实例名 = `custom_name or 客户端名` → `report` 闭包（`modpackImportProgress` + `gameStateChanged` 双驱动）→ `install_client_instance` → jar 直链下进 `versions/<名>/mods`（**88→100 单调进度**，防回跳）→ **成功/失败均双发** `modpackImportComplete`（导入弹窗永锁防护，沿 importModpack 先例）+ `clientDownloadFinished`；成功后 `getVersions`+`loadMods`；旧 `client_dest_dir` 落盘路径自本管线移除（函数保留）
+- `ui/index.html`：`openVersionPicker` clients 分支**显示实例名输入框**（默认值=客户端名，占位同名）；`downloadClientWithPicker` clients 回调（`modpackImporting` 并发锁 → 临时下载中 → `openClientImportDialog(实例名)` → 透传 customName）；新 `openClientImportDialog(name)`（弹窗直接进进度态、跳确认页、锁取消钮「导入中...」、标题「安装客户端 - 名」、复位 HMCL 文件计数）；`clientCardHtml` **删「已下载」永久禁用分支**（三态：打开页面/下载中…/下载）；`onClientDownloadFinished` 不再置 `clientsDownloaded`；`closeModpackImportModal` 重置标题；h3 加 `id="modpackImportTitle"`
+
+**验证**：红→绿 TDD —— `tests/test_clients_catalog.py` 追加 RED 2F → GREEN **16**（严格校验/回退链 6 断言）；`tests/test_client_instance_install.py` 新建 RED 4F → GREEN（四件套顺序/目录+隔离/json 落盘/warning 透传/幂等/原版失败传播/main.py 编排静态 7 needle/mll helper）；`tests/test_clients_ui.js` 改写 RED（缺 `openClientImportDialog`/仍含「已下载」/`versionPickerName` TypeError）→ GREEN **115/0**（+ 名称默认值、自定义名透传 `['meteor','1.21.11','MyMeteor']`、弹窗进度态+标题含实例名、并发锁 toast 拦截、完成不锁死回「下载」×2 路径）；全套回归 pytest **151** + JS 8 套 128/115/71/82/196/11/61/22=**686** 全 0 FAIL + `py_compile` + 提取 `<script>` `node --check`；**代理集成冒烟 SMOKE PASS**（tmp 目录、仅跳过原版大资产）：真实目录 optix→`optixclient`、回退链取条目标注 **mc=1.21.10**、推荐 **fabric 0.19.5**、版本 JSON **8 libraries + KnotClient**、隔离目录齐（config/saves/resourcepacks/mods）、**41.6MB jar** 落 `versions/Optix Client Smoke/mods/`、warning 空
+
+### 客户端卡片图标本地化（修 GitHub 头像不显示，2026-10-04）
+
+**现象**：用户截图 —— 客户端页 9 张卡只显字母兜底（meteor/wurst/ares/bleachhack/fpsmaster/combatant/travel/mastermind/payload），其余（Modrinth CDN / forgecdn 图标）全正常。
+
+**根因（先查后修）**：失败清单与图标域名**完全重合**——失败 9 张全是 `github.com/<org>.png?size=128` 外链；三连实测：GitHub 头像**直连超时**、同 URL 走代理 200、Modrinth CDN/forgecdn **直连 200**。应用内 QtWebEngine 未配代理 → 直连 `avatars.githubusercontent.com` 超时 → `<img onerror="this.remove()">` 自愈成字母兜底。上轮冒烟「18 图标全 200」是在**带代理的 Python 进程**里测的，与应用内环境不同。
+
+**实现**：
+- 18 张图标全部下载入库 `ui/static/icons/clients/<id>.<ext>`（代理优先、直连兜底、**按 magic 判型**——GitHub 对部分头像实际回 JPEG 但扩展名写 .png，如 BleachHack/MasterMind → `.jpg`；合计 218KB）
+- `launcher_core/clients_catalog.py`：18 处 `icon` 字段外链 → `static/icons/clients/<id>.<ext>`（逐条断言替换、残留 `"icon": "http` 断言为零）
+- 图床选择不再影响显示，顺带去掉运行时外网依赖（离线/弱网可用，加载更快）
+
+**验证**：红→绿 TDD —— `tests/test_clients_catalog.py` 追加 `test_client_icons_localized_and_exist` RED（NameError→外链断言失败）→ GREEN（逐条：非 http、`static/icons/clients/` 前缀、文件存在非空、格式白名单、**盘上无孤儿文件**）；旧 schema 断言 `icon=="" or startswith("http")` 同步改为仅允许本地/空（新旧两断言互补）；全套回归 pytest **152** + JS 8 套 **686** 全 0 FAIL + `py_compile` OK；`git check-ignore` 确认 `!ui/static/icons/**` 白名单放行新目录（18 文件待跟踪）
+
+**跟进（同日）**：加载完的图标仍透出字母/灰底（透明底图标可见）—— img 加 `onload="this.parentNode.classList.add('icon-loaded')"`，CSS `.client-icon.icon-loaded` 置 `background: transparent` + 隐藏 `.client-icon-fallback`（`onerror remove` 自愈保留，ATH 等无图条目不受影响）；`tests/test_clients_ui.js` 补 4 断言 RED → GREEN **120/0**，全套 JS **691** 0 FAIL + pytest 152 + `node --check`
+
+### 导入弹窗收起改造 + Meteor 重复 jar 去重（2026-10-08）
+
+**需求**：① 点「—」收起后**整窗消失**，进度合并到侧边栏启动按钮上方的进度面板（`#downloadProgressPanel`），可展开还原；② 修「点下载 Meteor 同时出现两个 meteor jar」——同实例重复下载累积旧 jar。
+
+**实现**（纯前端 + 一处 Python 钩子，Python 安装管线零改动）：
+- `index.html`：`collapseImportModal` 置 `importCollapsed=true` + `display:none`（不再走 `#importMiniView/#importFullView` 双视图，两块 DOM 删除）；`expandImportModal` 复位并显示面板回收；`closeModpackImportModal` 改调 `resetImportCollapsed()`（不能调 expand，否则关闭时重弹窗口）；面板 header 新增 `#importExpandBtn` 展开小按钮；`updateModpackImportProgress` 收起态分支镜像写面板（title/计数/进度条/文件列表，pct 复用 updateLaunchButton 同款 count 公式避免双写闪烁）；`onModpackImportComplete` 收起态自动展开 + 回收面板
+- `mod_manager.py` 新增 `remove_stale_client_mods(new_jar)`：按 `ModInfo.mod_id`（fabric.mod.json）扫同目录其它 .jar 删除，mod_id 空/文件缺失 no-op；main.py jar 下载成功后调用（有 removed 打日志）
+- 现场清理：`versions/Meteor Client/mods/` 旧重复已删，仅剩 `meteor-client-1.21.6-7.jar`
+
+**验证**：红→绿 TDD —— `tests/test_import_collapse.js` 新建 RED 11/24 → GREEN **60→63**（11 收起行为 + 完成回收 + 网页流不弹窗守卫）；`tests/test_mod_dedupe.py` 新建 5 用例 + `test_client_instance_install.py` 追加调用时序静态（remove 必须在 `modrinth_api.download_file` 之后、downloadClientVersion 14000 字符窗口内保留全部原 needle）RED → GREEN；`test_client_instance_install.py` 正则笔误 `{0:14000}`→`{0,14000}` 修缮；全套回归 pytest **158** + JS **751/0**（9 套）
+
+### LiquidBounce 内置网页下载（2026-10-08）
+
+**需求**：参考 LiquidBounce Launcher——点卡片「下载」→ **启动器内**开网页窗口选版本 → 接 jar 直链走既有实例安装管线（非外部浏览器打开再手动拖回）。
+
+**实现**：
+- `clients_catalog.py`：新 strategy **`web_download`** + 第 20 条 `{liquidbounce, 作弊-PVP, platform=web, endpoint=https://liquidbounce.net/download, kind=jar, icon=static/icons/clients/liquidbounce.svg}`（官方 logo SVG 3981B 入库）
+- `main.py`：新槽 `openClientWebPage(client_id)`（校验 strategy 后开窗，`self._client_web_win` 持引用防 GC）+ `startWebClientDownload(client_id, url, filename)`（存 `_web_jar_pending` → `downloadClientVersion(client_id, url, "")` **复用整条安装管线**，不动既有静态 needle）；`downloadClientVersion` 入口防御（web_download 且 version_id≠pending url → 报「缺少网页下载直链」）+ `_do_download` 新分支（url=pending、filename 取建议名、picked_meta 空 → MC 走 current→latest 回退链）；窗口类 `ClientWebPage(QWebEnginePage)` 覆写 `acceptNavigationRequest` 拦 `.jar` 直链导航、`ClientWebWindow`（off-the-record `QWebEngineProfile`、`downloadRequested` 拦 `.jar` → `cancel()` → `startWebClientDownload` → 关窗，非 jar 一律 cancel），插在 LauncherBridge 与 MainWindow 之间
+- `index.html`：`downloadClientWithPicker` 新分支 open_page → **web_download** → pack；`onModpackImportComplete` 加可见性守卫（`importCollapsed || display==='flex'` 才 expand，网页流完成不凭空弹窗，失败靠 clientDownloadFinished toast）
+- `webengine_flags.py`：`merge_chromium_flags` 注入 env 代理——QtWebEngine 网络栈不读系统代理，`HTTPS_PROXY>https_proxy>HTTP_PROXY>http_proxy` 存在且用户 base 无 `--proxy-server` 时前置注入（应用内网页窗口依赖此项）
+
+**验证**：红→绿 TDD —— `tests/test_liquidbounce_web.py` 新建 5 用例（条目/main.py 槽+窗口+拦截+分支静态/JS 路由分支序/代理 env 四态/无外部浏览器）RED 5F；`test_clients_catalog.py` 改 RED 3F（20 条/14+6/web_download 组成）；`test_clients_ui.js` RED 7F（web_download 行为 + 卡片渲染 + 「作弊」4 卡）；`test_import_collapse.js` 追加 1F（不弹窗守卫）；`test_webengine_flags.py` 既有 3 个 merge 用例补 monkeypatch delenv 消 env 非确定性 → 全 GREEN；全套回归 **pytest 163 + JS 765/0 + node --check（提取 `<script>`）+ py_compile + QtWebEngineCore 导入冒烟 OK**

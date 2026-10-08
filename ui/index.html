@@ -1797,6 +1797,15 @@
             color: rgba(255, 255, 255, 0.55);
         }
 
+        /* 图片加载成功：隐藏字母兜底与容器灰底（透明图标不再透出背景） */
+        .client-icon.icon-loaded {
+            background: transparent;
+        }
+
+        .client-icon.icon-loaded .client-icon-fallback {
+            display: none;
+        }
+
         .client-title-col {
             min-width: 0;
             display: flex;
@@ -2510,8 +2519,7 @@
             100% { background-position: 0 0; }
         }
 
-        /* Import modal collapsed: downloader-style mini card (原位缩小) */
-        #importModalContent.import-collapsed { max-width: 420px !important; }
+        /* (collapsed import now docks into the sidebar panel above the launch button) */
     </style>
 </head>
 <body>
@@ -2806,9 +2814,8 @@
                 <!-- Modpack import modal -->
                 <div class="modal-overlay" id="modpackImportModal" style="display:none;" onclick="if(event.target===this && !modpackImporting)closeModpackImportModal()">
                     <div class="modal-content" id="importModalContent" style="max-width:500px;">
-                        <div id="importFullView">
                         <div class="modal-header">
-                            <h3>导入整合包</h3>
+                            <h3 id="modpackImportTitle">导入整合包</h3>
                             <button class="modal-close" onclick="closeModpackImportModal()">&times;</button>
                         </div>
                         <div class="modal-body">
@@ -2857,26 +2864,9 @@
                             <div id="modpackImportResult" style="display:none;"></div>
                         </div>
                         <div class="modal-footer" style="padding:12px 16px;border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:flex-end;gap:8px;">
-                            <button class="settings-file-btn" onclick="collapseImportModal()" title="收起为下载器样式小面板，导入在后台继续" style="display:inline-flex;align-items:center;gap:6px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>收起</button>
+                            <button class="settings-file-btn" onclick="collapseImportModal()" title="收起窗口，导入进度合并到侧边栏启动按钮上方" style="display:inline-flex;align-items:center;gap:6px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>收起</button>
                             <button class="settings-file-btn" id="modpackImportCancelBtn" onclick="closeModpackImportModal()">取消</button>
                             <button class="settings-file-btn" id="modpackImportConfirmBtn" onclick="confirmModpackImport()" style="background:var(--accent-color,#4fc3f7);color:#000;">导入</button>
-                        </div>
-                        </div><!-- /importFullView -->
-                        <div id="importMiniView" style="display:none;">
-                            <div class="download-progress-header" style="margin:14px 16px 0;">
-                                <span class="download-progress-title">下载模组</span>
-                                <span class="download-progress-count" id="importMiniCount">0%</span>
-                            </div>
-                            <div style="padding:0 16px;">
-                                <div class="progress-bar" style="margin-top:6px;">
-                                    <div class="progress-fill" id="importMiniFill" style="width:0%;"></div>
-                                </div>
-                            </div>
-                            <div class="download-file-list" id="importMiniList" style="max-height:320px;margin:8px 16px;"></div>
-                            <div style="padding:10px 16px;border-top:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                                <span id="importMiniMsg" style="font-size:12px;color:rgba(255,255,255,0.5);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
-                                <button class="settings-file-btn" onclick="expandImportModal()" title="展开完整窗口" style="display:inline-flex;align-items:center;gap:6px;flex:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>展开</button>
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -3308,6 +3298,7 @@
                     <div class="download-progress-header">
                         <span class="download-progress-title" id="downloadProgressTitle">正在下载...</span>
                         <span class="download-progress-count" id="downloadProgressCount"></span>
+                        <button class="settings-file-btn" id="importExpandBtn" onclick="expandImportModal()" title="展开导入窗口" style="display:none;font-size:11px;padding:3px 8px;margin-left:8px;flex:none;">展开</button>
                     </div>
                     <div class="progress-bar">
                         <div class="progress-fill" id="progressFill"></div>
@@ -4395,19 +4386,16 @@
 
         function clientCardHtml(c) {
             var downloading = !!clientsDownloading[c.id];
-            var downloaded = !!clientsDownloaded[c.id];
             var action;
             if (c.strategy === 'open_page') {
                 action = '<button class="client-btn" onclick="openClientSite(\'' + escapeAttr(c.endpoint) + '\')">打开页面</button>';
             } else if (downloading) {
                 action = '<button class="client-btn" disabled>下载中…</button>';
-            } else if (downloaded) {
-                action = '<button class="client-btn" disabled>已下载</button>';
             } else {
                 action = '<button class="client-btn" onclick="downloadClientWithPicker(\'' + c.id + '\')">下载</button>';
             }
             var iconHtml = '<div class="client-icon">' +
-                (c.icon ? '<img class="client-icon-img" src="' + escapeAttr(c.icon) + '" alt="" onerror="this.remove()">' : '') +
+                (c.icon ? '<img class="client-icon-img" src="' + escapeAttr(c.icon) + '" alt="" onload="this.parentNode.classList.add(\'icon-loaded\')" onerror="this.remove()">' : '') +
                 '<span class="client-icon-fallback">' + ((c.name || '?').charAt(0)) + '</span></div>';
             var typeBadge = c.type === 'pack' ? '<span class="client-badge pack">模组包</span>' : '<span class="client-badge">客户端</span>';
             var catBadge = c.category ? '<span class="client-badge cat">' + escapeHtml(c.category) + '</span>' : '';
@@ -4437,6 +4425,12 @@
                 openClientSite(entry.endpoint);
                 return;
             }
+            if (entry.strategy === 'web_download') {
+                if (pythonInterface && pythonInterface.openClientWebPage) {
+                    pythonInterface.openClientWebPage(id);
+                }
+                return;
+            }
             if (entry.type === 'pack') {
                 // 整合包：复用版本选择器（modpacks 分支，含实例名输入）
                 openVersionPicker(id, 'modpacks', function(versionId, versionName, customName) {
@@ -4446,11 +4440,17 @@
                 }, entry.platform || 'modrinth');
                 return;
             }
-            openVersionPicker(id, 'clients', function(versionId, versionName) {
+            openVersionPicker(id, 'clients', function(versionId, versionName, customName) {
+                if (modpackImporting) {
+                    showToast('已有安装任务进行中，请等待完成', 'info');
+                    return;
+                }
                 clientsDownloading[id] = true;
                 filterClients();
+                var cname = (customName || '').trim();
+                openClientImportDialog(cname || (entry ? entry.name : id));
                 if (pythonInterface && pythonInterface.downloadClientVersion) {
-                    pythonInterface.downloadClientVersion(id, versionId || '', '');
+                    pythonInterface.downloadClientVersion(id, versionId || '', cname);
                 }
             });
         }
@@ -4463,8 +4463,7 @@
             if (!res || !res.id) return;
             delete clientsDownloading[res.id];
             if (res.ok) {
-                clientsDownloaded[res.id] = true;
-                showToast(res.message || (res.id + ' 下载完成'), 'success');
+                showToast(res.message || (res.id + ' 安装完成'), 'success');
             } else {
                 showToast(res.message || (res.id + ' 下载失败'), 'error');
             }
@@ -5005,12 +5004,21 @@
             document.getElementById('versionPickerTitle').textContent = '选择版本 - ' + contentId;
             document.getElementById('versionPickerList').innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:30px;"><div class="spinner-icon" style="display:inline-block;width:24px;height:24px;border:3px solid var(--border-color);border-top-color:var(--accent-color);border-radius:50%;animation:spin 0.8s linear infinite;margin-bottom:10px;"></div><div>正在加载版本列表...</div></div>';
 
-            // Show/hide name input for modpacks
+            // Show/hide name input for modpacks & clients (实例名)
             var nameInput = document.getElementById('versionPickerNameInput');
             if (contentType === 'modpacks') {
                 nameInput.style.display = 'block';
                 document.getElementById('versionPickerName').value = '';
                 document.getElementById('versionPickerName').placeholder = contentId;
+            } else if (contentType === 'clients') {
+                nameInput.style.display = 'block';
+                var centry = null;
+                for (var ci = 0; ci < clientsData.length; ci++) {
+                    if (clientsData[ci].id === contentId) { centry = clientsData[ci]; break; }
+                }
+                var defName = centry ? (centry.name || contentId) : contentId;
+                document.getElementById('versionPickerName').value = defName;
+                document.getElementById('versionPickerName').placeholder = defName;
             } else {
                 nameInput.style.display = 'none';
             }
@@ -5036,6 +5044,7 @@
         // === Modpack Import ===
         var pendingModpackPath = '';
         var modpackImporting = false;
+        var importCollapsed = false;
 
         function triggerModpackImport() {
             if (modpackImporting) {
@@ -5094,6 +5103,21 @@
             
             // Reset file input
             event.target.value = '';
+        }
+
+        // 客户端实例安装：直接进入进度态（跳过信息确认页），锁定导入弹窗
+        function openClientImportDialog(name) {
+            document.getElementById('modpackImportModal').style.display = 'flex';
+            document.getElementById('modpackImportTitle').textContent = '安装客户端 - ' + name;
+            document.getElementById('modpackImportInfo').style.display = 'none';
+            document.getElementById('modpackImportResult').style.display = 'none';
+            document.getElementById('modpackImportProgress').style.display = 'block';
+            document.getElementById('modpackImportConfirmBtn').style.display = 'none';
+            var cancelBtn = document.getElementById('modpackImportCancelBtn');
+            if (cancelBtn) { cancelBtn.setAttribute('disabled', 'disabled'); cancelBtn.textContent = '导入中...'; }
+            modpackImporting = true;
+            modpackImportLastFileCount = { downloaded: 0, total: 0 };
+            modpackImportLastPct = 0;
         }
 
         function showModpackImportDialog(info) {
@@ -5304,41 +5328,55 @@
                 fileList.scrollTop = prevScroll;
             }
 
-            // Downloader-style mini view (collapsed modal): count/fill/msg/list
-            var miniCount = document.getElementById('importMiniCount');
-            if (miniCount) {
-                miniCount.textContent = (downloadsActive && display_total > 0)
-                    ? (display_downloaded + '/' + display_total + ' · ' + overallPct + '%')
-                    : (overallPct + '%');
-            }
-            var miniFill = document.getElementById('importMiniFill');
-            if (miniFill) {
-                miniFill.style.width = overallPct + '%';
-            }
-            var miniMsg = document.getElementById('importMiniMsg');
-            if (miniMsg) {
-                miniMsg.textContent = (!downloadsActive && message) ? message : '';
-            }
-            var miniList = document.getElementById('importMiniList');
-            if (miniList && file_states && file_states.length > 0) {
-                var mhtml = '';
-                var mShow = file_states.filter(function(f) { return f.status === 'downloading'; })
-                    .concat(file_states.filter(function(f) { return f.status === 'error'; }))
-                    .concat(file_states.filter(function(f) { return f.status === 'done'; }));
-                var mMax = Math.min(mShow.length, 15);
-                for (var mi = 0; mi < mMax; mi++) {
-                    mhtml += dlFileItemHtml(mShow[mi]);
+            // Collapsed: mirror progress into the sidebar panel above the launch button
+            if (importCollapsed) {
+                var sPanel = document.getElementById('downloadProgressPanel');
+                if (sPanel) sPanel.style.display = 'block';
+                var sTitle = document.getElementById('downloadProgressTitle');
+                if (sTitle) sTitle.textContent = message || '正在导入...';
+                var sCount = document.getElementById('downloadProgressCount');
+                var sFill = document.getElementById('progressFill');
+                if (file_total > 0) {
+                    var sFrac = 0;
+                    if (file_states) {
+                        for (var sk = 0; sk < file_states.length; sk++) {
+                            var stf = file_states[sk];
+                            if (stf.status === 'downloading') sFrac += (stf.progress || 0) / 100;
+                            else if (stf.status === 'error') sFrac += 1;
+                        }
+                    }
+                    var sPct = Math.min(100, Math.round((file_downloaded + sFrac) * 100 / file_total));
+                    if (sCount) sCount.textContent = file_downloaded + '/' + file_total + ' · ' + sPct + '%';
+                    if (sFill) { sFill.style.width = sPct + '%'; sFill.style.animation = 'none'; }
+                } else {
+                    if (sCount) sCount.textContent = overallPct + '%';
+                    if (sFill) { sFill.style.width = overallPct + '%'; }
                 }
-                var mPrevScroll = miniList.scrollTop;
-                miniList.innerHTML = mhtml;
-                miniList.scrollTop = mPrevScroll;
+                var sList = document.getElementById('downloadFileList');
+                if (sList && file_states && file_states.length > 0) {
+                    var sDownloading = file_states.filter(function(f) { return f.status === 'downloading'; });
+                    var sDone = file_states.filter(function(f) { return f.status !== 'downloading'; });
+                    var sShow = sDownloading.concat(sDone.slice(-Math.max(0, 5 - sDownloading.length)));
+                    var sHtml = '';
+                    for (var si = 0; si < sShow.length; si++) {
+                        sHtml += dlFileItemHtml(sShow[si]);
+                    }
+                    var sPrevScroll = sList.scrollTop;
+                    sList.innerHTML = sHtml;
+                    sList.scrollTop = sPrevScroll;
+                }
             }
         }
 
         function onModpackImportComplete(result) {
             modpackImporting = false;
-            expandImportModal();
+            var importModalEl = document.getElementById('modpackImportModal');
+            if (importCollapsed || (importModalEl && importModalEl.style.display === 'flex')) {
+                expandImportModal();
+            }
             resetModpackImportCancelBtn();
+            var sPanel = document.getElementById('downloadProgressPanel');
+            if (sPanel) sPanel.style.display = 'none';
             document.getElementById('modpackImportProgress').style.display = 'none';
             var resultDiv = document.getElementById('modpackImportResult');
             resultDiv.style.display = 'block';
@@ -5381,8 +5419,9 @@
                 return;
             }
             document.getElementById('modpackImportModal').style.display = 'none';
+            document.getElementById('modpackImportTitle').textContent = '导入整合包';
             pendingModpackPath = '';
-            expandImportModal();
+            resetImportCollapsed();
             modpackImportLastFileCount = { downloaded: 0, total: 0 };
             modpackImportLastPct = 0;
             resetModpackImportCancelBtn();
@@ -6615,27 +6654,33 @@
             }
         }
 
-        // --- import modal collapsed view (downloader-style mini card) -------
+        // --- collapsed import: hide the window, dock progress above the launch button ---
         function collapseImportModal() {
             if (!modpackImporting) {
                 showToast('导入开始后才能收起', 'info');
                 return;
             }
-            var mini = document.getElementById('importMiniView');
-            if (mini && mini.style.display === 'block') return;
-            document.getElementById('importFullView').style.display = 'none';
-            if (mini) mini.style.display = 'block';
-            var content = document.getElementById('importModalContent');
-            if (content) content.classList.add('import-collapsed');
+            importCollapsed = true;
+            document.getElementById('modpackImportModal').style.display = 'none';
+            var expandBtn = document.getElementById('importExpandBtn');
+            if (expandBtn) expandBtn.style.display = 'inline-flex';
+            var panel = document.getElementById('downloadProgressPanel');
+            if (panel) {
+                panel.style.display = 'block';
+                var title = document.getElementById('downloadProgressTitle');
+                if (title && !title.textContent) title.textContent = '正在导入...';
+            }
+        }
+
+        function resetImportCollapsed() {
+            importCollapsed = false;
+            var expandBtn = document.getElementById('importExpandBtn');
+            if (expandBtn) expandBtn.style.display = 'none';
         }
 
         function expandImportModal() {
-            var full = document.getElementById('importFullView');
-            if (full) full.style.display = '';
-            var mini = document.getElementById('importMiniView');
-            if (mini) mini.style.display = 'none';
-            var content = document.getElementById('importModalContent');
-            if (content) content.classList.remove('import-collapsed');
+            resetImportCollapsed();
+            document.getElementById('modpackImportModal').style.display = 'flex';
         }
 
         function killGame() {
