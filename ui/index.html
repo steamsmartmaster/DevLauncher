@@ -2520,7 +2520,13 @@
         }
 
         /* (collapsed import now docks into the sidebar panel above the launch button) */
-    </style>
+    .java-row { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: rgba(255,255,255,0.06); border-radius: 6px; font-size: 12px; }
+.java-badge { background: rgba(99,102,241,0.35); color: #c7d2fe; border-radius: 4px; padding: 1px 5px; font-weight: 600; flex-shrink: 0; }
+.java-rec { background: rgba(34,197,94,0.3); color: #bbf7d0; border-radius: 4px; padding: 1px 5px; flex-shrink: 0; }
+.java-path-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(255,255,255,0.75); }
+.java-row button { background: rgba(255,255,255,0.12); border: none; color: #fff; border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: 11px; flex-shrink: 0; }
+.java-row button:hover { background: rgba(255,255,255,0.22); }
+</style>
 </head>
 <body>
     <div class="background-layer" id="backgroundLayer"></div>
@@ -3163,7 +3169,7 @@
                             <div class="settings-item">
                                 <div class="settings-item-label">Java 路径</div>
                                 <div class="settings-item-value" style="width: 300px;">
-                                    <input type="text" class="settings-input" id="javaPath" value="" style="width: 100%;" onchange="saveSettings()">
+                                    <input type="text" class="settings-input" id="javaPath" value="" style="width: 100%;" onchange="javaPathEdited(this)">
                                 </div>
                             </div>
                             <div class="settings-item">
@@ -3186,10 +3192,18 @@
                             <div class="settings-item">
                                 <div class="settings-item-label">Java 路径</div>
                                 <div class="settings-item-value" style="width: 300px;">
-                                    <input type="text" class="settings-input" id="javaPath" value="" placeholder="自动检测" style="width: 100%;">
+                                    <input type="text" class="settings-input" id="javaPath" value="" placeholder="自动检测" style="width: 100%;" onchange="javaPathEdited(this)">
                                     <button class="settings-file-btn" onclick="selectJavaPath()">
                                         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                                     </button>
+                                </div>
+                            </div>
+                            <div class="settings-item">
+                                <div class="settings-item-label">已安装 Java</div>
+                                <div class="settings-item-value" style="width: 300px; flex-direction: column; align-items: stretch; gap: 6px;">
+                                    <button class="settings-file-btn" onclick="scanJavas()">扫描 Java</button>
+                                    <div id="javaListEmpty" style="display: none; font-size: 12px; color: rgba(255,255,255,0.5);">点「扫描 Java」查找已安装的 Java</div>
+                                    <div id="javaListItems" style="max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;"></div>
                                 </div>
                             </div>
                             <div class="settings-item">
@@ -3365,6 +3379,8 @@
                     launchGame: function(v) { console.log('[JS] launchGame called (no bridge)'); },
                     installVersion: function(v) { console.log('[JS] installVersion called (no bridge)'); },
                     saveSettings: function(s) { console.log('[JS] saveSettings called (no bridge)'); },
+                    scanJavas: function() { console.log('[JS] scanJavas called (no bridge)'); },
+                    hideJava: function(p) { console.log('[JS] hideJava called (no bridge)'); },
                     selectBackground: function() { console.log('[JS] selectBackground called (no bridge)'); }
                 };
             }
@@ -6701,7 +6717,7 @@
             console.log('[JS] updateSettingsUI received, background:', settings.background ? settings.background.substring(0, 30) + '... (len=' + settings.background.length + ')' : 'empty');
             document.getElementById('maxMemory').value = settings.max_memory || 4096;
             document.getElementById('minMemory').value = settings.min_memory || 1024;
-            document.getElementById('javaPath').value = settings.java_path || '';
+            document.querySelectorAll('#javaPath').forEach(function(el) { el.value = settings.java_path || ''; });
             document.getElementById('jvmArgs').value = settings.jvm_args || '';
             document.getElementById('windowWidth').value = settings.window_width || 854;
             document.getElementById('windowHeight').value = settings.window_height || 480;
@@ -6859,6 +6875,61 @@
             if (pythonInterface && pythonInterface.selectJavaPath) {
                 pythonInterface.selectJavaPath();
             }
+        }
+
+        function scanJavas() {
+            if (pythonInterface && pythonInterface.scanJavas) pythonInterface.scanJavas();
+        }
+
+        function setJavaPathValue(path) {
+            document.querySelectorAll('#javaPath').forEach(function(el) { el.value = path; });
+            saveSettings();
+        }
+
+        function javaPathEdited(src) {
+            document.querySelectorAll('#javaPath').forEach(function(el) { el.value = src.value; });
+            saveSettings();
+        }
+
+        function hideJavaPath(path) {
+            if (pythonInterface && pythonInterface.hideJava) pythonInterface.hideJava(path);
+            var box = document.getElementById('javaListItems');
+            if (box && box.childNodes) {
+                for (var i = box.childNodes.length - 1; i >= 0; i--) {
+                    var n = box.childNodes[i];
+                    if (n.getAttribute && n.getAttribute('data-path') === path) box.removeChild(n);
+                }
+            }
+        }
+
+        function onJavasScanned(payload) {
+            var data = {};
+            try { data = JSON.parse(payload); } catch (e) { data = {}; }
+            var list = data.javas || [];
+            var box = document.getElementById('javaListItems');
+            var empty = document.getElementById('javaListEmpty');
+            if (!box) return;
+            box.innerHTML = '';
+            if (data.error) { showToast('Java 扫描失败: ' + data.error, 'error'); }
+            if (!list.length) { if (empty) empty.style.display = 'block'; return; }
+            if (empty) empty.style.display = 'none';
+            list.forEach(function(j) {
+                var row = document.createElement('div');
+                row.className = 'java-row';
+                row.setAttribute('data-path', j.path);
+                row.innerHTML = '<span class="java-badge">J' + j.major + '</span>' +
+                    (data.recommend && j.path === data.recommend ? '<span class="java-rec">推荐</span>' : '') +
+                    '<span class="java-path-text">' + escapeHtml(j.path) + '</span>';
+                var useBtn = document.createElement('button');
+                useBtn.textContent = '使用';
+                useBtn.onclick = function() { setJavaPathValue(row.getAttribute('data-path')); };
+                var hideBtn = document.createElement('button');
+                hideBtn.textContent = '隐藏';
+                hideBtn.onclick = function() { hideJavaPath(row.getAttribute('data-path')); };
+                row.appendChild(useBtn);
+                row.appendChild(hideBtn);
+                box.appendChild(row);
+            });
         }
 
         function selectBackground() {

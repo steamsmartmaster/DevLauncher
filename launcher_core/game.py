@@ -30,7 +30,8 @@ class GameLauncher:
         token: str,
         jvm_args: Optional[list[str]] = None,
         min_memory: int = 1024,
-        max_memory: int = 4096
+        max_memory: int = 4096,
+        java_executable: Optional[str] = None
     ) -> tuple[bool, str]:
         """Launch Minecraft with given parameters. Returns (success, message)."""
         logger.info(f"准备启动游戏 - 版本: {version_id}, 用户: {username}")
@@ -148,6 +149,11 @@ class GameLauncher:
                 self.minecraft_dir,
                 options
             )
+
+            # 用户显式选择的 Java 优先于 mll 自动/捆绑运行时
+            if java_executable:
+                command[0] = java_executable
+                logger.info(f"使用设置的 Java: {java_executable}")
 
             # Set gameDirectory if version isolation is enabled
             if game_dir != self.minecraft_dir:

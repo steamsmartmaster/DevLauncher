@@ -13,6 +13,7 @@ class Settings:
         "max_memory": 4096,
         "min_memory": 1024,
         "java_path": "",
+        "java_hidden": [],
         "jvm_args": "",
         "window_width": 854,
         "window_height": 480,

@@ -148,6 +148,7 @@ class LauncherBridge(QObject):
     pluginDetailLoaded = pyqtSignal(str)  # JSON 插件详情 (save 后带 success/error)
     clientsLoaded = pyqtSignal(str)  # JSON 客户端目录列表 (clients_catalog.get_catalog())
     clientDownloadFinished = pyqtSignal(str)  # JSON {id, ok, message}
+    javasScanned = pyqtSignal(str)  # JSON: {javas, recommend, mc_version, error?}
 
     def __init__(self, auth: AuthManager, versions: VersionManager, game: GameLauncher, settings: Settings, mods: ModManager):
         super().__init__()
@@ -584,7 +585,8 @@ class LauncherBridge(QObject):
                     login_data['id'],
                     login_data['access_token'],
                     max_memory=self.settings.get('max_memory'),
-                    min_memory=self.settings.get('min_memory')
+                    min_memory=self.settings.get('min_memory'),
+                    java_executable=(self.settings.get('java_path') or '')
                 )
                 
                 if success:
@@ -712,6 +714,40 @@ class LauncherBridge(QObject):
             settings_data = self.settings._settings.copy()
             settings_data["background"] = settings_data.get("background", "")
             QTimer.singleShot(100, lambda: self.settingsLoaded.emit(json.dumps(settings_data)))
+
+    @pyqtSlot()
+    def scanJavas(self):
+        """扫描系统已安装 Java（后台线程，结果经 javasScanned 推送）"""
+        def _scan():
+            try:
+                from launcher_core import java_scan
+                cand = java_scan.scan_candidates(
+                    dict(os.environ),
+                    minecraft_dir=self.settings.get('minecraft_dir', ''))
+                found = java_scan.scan_javas(cand["direct"], cand["walk"])
+                hidden = set(self.settings.get('java_hidden') or [])
+                visible = [j for j in found if j["path"] not in hidden]
+                rec = java_scan.recommend_java(visible, self._current_mod_version)
+                self.javasScanned.emit(json.dumps({
+                    "javas": visible,
+                    "recommend": (rec or {}).get("path", ""),
+                    "mc_version": self._current_mod_version or "",
+                }, ensure_ascii=False))
+            except Exception as e:
+                logger.error(f"扫描 Java 失败: {e}", exc_info=True)
+                self.javasScanned.emit(json.dumps(
+                    {"javas": [], "recommend": "", "error": str(e)},
+                    ensure_ascii=False))
+        threading.Thread(target=_scan, daemon=True).start()
+
+    @pyqtSlot(str)
+    def hideJava(self, path: str):
+        """从列表隐藏某个 Java（写入 java_hidden）"""
+        hidden = list(self.settings.get('java_hidden') or [])
+        if path and path not in hidden:
+            hidden.append(path)
+            self.settings.set('java_hidden', hidden)
+        logger.info(f"隐藏 Java: {path}")
 
     @pyqtSlot()
     def selectMinecraftDir(self):
@@ -2624,6 +2660,7 @@ class MainWindow(QMainWindow):
         self.bridge.pluginDetailLoaded.connect(self._on_plugin_detail_loaded)
         self.bridge.clientsLoaded.connect(self._on_clients_loaded)
         self.bridge.clientDownloadFinished.connect(self._on_client_download_finished)
+        self.bridge.javasScanned.connect(self._on_javas_scanned)
 
         # 启动加载启用中的插件 (M7: 延后到事件循环 + 兜底, 插件异常不崩启动)
         QTimer.singleShot(0, self._startup_load_plugins)
@@ -2783,6 +2820,11 @@ class MainWindow(QMainWindow):
         logger.info(f"信号: clientDownloadFinished: {result_json[:200]}")
         self.web_view.page().runJavaScript(
             f"onClientDownloadFinished({result_json})"
+        )
+
+    def _on_javas_scanned(self, payload: str):
+        self.web_view.page().runJavaScript(
+            f"onJavasScanned({json.dumps(payload)})"
         )
 
     def _on_game_state_changed(self, state: str, extra: str):

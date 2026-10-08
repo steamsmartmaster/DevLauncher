@@ -396,3 +396,16 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - `webengine_flags.py`：`merge_chromium_flags` 注入 env 代理——QtWebEngine 网络栈不读系统代理，`HTTPS_PROXY>https_proxy>HTTP_PROXY>http_proxy` 存在且用户 base 无 `--proxy-server` 时前置注入（应用内网页窗口依赖此项）
 
 **验证**：红→绿 TDD —— `tests/test_liquidbounce_web.py` 新建 5 用例（条目/main.py 槽+窗口+拦截+分支静态/JS 路由分支序/代理 env 四态/无外部浏览器）RED 5F；`test_clients_catalog.py` 改 RED 3F（20 条/14+6/web_download 组成）；`test_clients_ui.js` RED 7F（web_download 行为 + 卡片渲染 + 「作弊」4 卡）；`test_import_collapse.js` 追加 1F（不弹窗守卫）；`test_webengine_flags.py` 既有 3 个 merge 用例补 monkeypatch delenv 消 env 非确定性 → 全 GREEN；全套回归 **pytest 163 + JS 765/0 + node --check（提取 `<script>`）+ py_compile + QtWebEngineCore 导入冒烟 OK**
+
+### Java 自动扫描与多 Java 管理（P0-1，2026-10-08）
+
+**需求**：参考 KAMUCL——设置页自动扫描系统已安装 Java、列表展示多版本（J 徽章/推荐标记）、可选用/隐藏，并让 `java_path` 真正作用于启动（修历史 bug：settings 的 `java_path` 从未被 `game.launch` 使用，只走 mll 自动检测）。
+
+**实现**：
+- `launcher_core/java_scan.py` 新模块（IO 全可注入 exists/scandir/runner，测试 hermetic）：`scan_candidates`（JAVA_HOME/PATH 直查 + ProgramFiles/ProgramFiles(x86)/LOCALAPPDATA 下 15 个厂商目录下钻 4 层 + `LOCALAPPDATA\Programs\各厂商` + `minecraft_dir\runtime` 下钻 6 层）→ `find_java_exes`（java.exe/javaw.exe/java 探测，目录命中即停、OSError 容忍）→ `parse_java_version`（`1.8.0_392`→8、`17.0.9`→17，双正则）→ `scan_javas`（normcase+realpath 去重、major 降序）；`required_java_major`（≤1.16→8、1.17→16、1.18/19→17、1.20.0-4→17、1.20.5+/快照/未知→21）；`recommend_java`（**满足要求的最低版本**——避免高版本破坏旧 MC；mc_version 空取最高；无满足项 None）
+- `main.py`：`javasScanned` 信号 + `scanJavas` 槽（daemon 线程扫描，`java_hidden` 过滤，按 `_current_mod_version` 推荐，JSON emit，异常回 error 载荷）+ `hideJava` 槽（追加 `java_hidden` 落盘）；MainWindow `_on_javas_scanned` → `runJavaScript(onJavasScanned(...))`；`launchGame` 透传 `java_executable=(settings java_path or '')`
+- `launcher_core/game.py`：`launch()` 新参 `java_executable`，命令生成后 `command[0] = java_executable`（显式设置 > mll 自动/捆绑运行时）
+- `settings.py`：DEFAULT_SETTINGS 加 `java_hidden: []`
+- `ui/index.html`：游戏设置组新增「已安装 Java」块（扫描按钮 + `#javaListItems` 列表 + `#javaListEmpty` 空态）；新函数 `scanJavas/setJavaPathValue/hideJavaPath/onJavasScanned/javaPathEdited`；两处同 id `#javaPath` 经 querySelectorAll 同步（updateSettingsUI 双写、onchange=javaPathEdited 镜像+保存）；`.java-row/.java-badge/.java-rec/.java-path-text` CSS；QWebChannel fallback 补 `scanJavas/hideJava` 空桩
+
+**验证**：红→绿 TDD —— `tests/test_java_scan.py` 新建 9 用例 RED（ImportError: cannot import name 'java_scan'）→ `java_scan.py` 落地后 6 pure GREEN + 3 static 红 → 接线后 **9/9**；`tests/test_java_ui.js` 新建 RED **0/14** → index.html 改造后 **33/0 GREEN**；全套回归 **pytest 172（163+9）+ JS 10 套 798/0 + node --check（提取 `<script>`）CHECK=0 + py_compile OK**；实施计划 `docs/plans/2026-10-08-java-scan.md`（含执行期偏差记录）。未提交，等用户发话。
