@@ -649,19 +649,57 @@ class LauncherBridge(QObject):
     def installVersion(self, version_id: str):
         """Install a Minecraft version"""
         logger.info(f"安装版本: {version_id}")
+
+        # mll 只在 libraries/assets 两段回调 setMax；两段按权重拼成整体百分比
+        phase_weights = (0.6, 0.4)
+
         def _install():
             file_count = [0]
             current_file = [""]
+            phase_no = [0]
+            phase_max = [0]
+            phase_cur = [0]
+            pct = [-1.0]
+
+            def emit_progress():
+                self.progressUpdate.emit(
+                    pct[0] if pct[0] >= 0 else -1,
+                    f"[{file_count[0]}] {current_file[0]}",
+                )
+
+            def on_set_max(max_count):
+                phase_no[0] += 1
+                phase_max[0] = max_count
+                phase_cur[0] = 0
+                emit_pct()
+
+            def on_set_progress(current):
+                phase_cur[0] = current
+                emit_pct()
+
+            def emit_pct():
+                idx = min(phase_no[0], len(phase_weights)) - 1
+                if idx < 0:
+                    return
+                frac = phase_cur[0] / phase_max[0] if phase_max[0] > 0 else 0.0
+                # mll 的 setMax 传 len-1 而计数到 len，frac 会短暂 >1
+                frac = min(max(frac, 0.0), 1.0)
+                done = sum(phase_weights[:idx])
+                pct[0] = min(99.0, (done + frac * phase_weights[idx]) * 100)
+                emit_progress()
 
             def on_status(status):
                 file_count[0] += 1
                 current_file[0] = status
                 logger.info(f"安装状态 [{file_count[0]}]: {status}")
+                emit_progress()
 
             try:
                 self.gameStateChanged.emit("installing", f"正在安装 {version_id}...")
                 self.versions.install_version(version_id, callback={
                     "setStatus": on_status,
+                    "setProgress": on_set_progress,
+                    "setMax": on_set_max,
                 })
                 logger.info(f"版本安装完成: {version_id} (共下载 {file_count[0]} 个文件)")
                 # Mark user-initiated installs as user-managed (devlauncher.cfg)
@@ -2779,7 +2817,9 @@ class MainWindow(QMainWindow):
 
     def _on_progress_update(self, progress: float, text: str):
         logger.debug(f"信号: progressUpdate - {progress:.1f}% {text}")
+        # json.dumps: 文件名/库坐标可能含引号，直接拼进 JS 字面量会截断语句
         self.web_view.page().runJavaScript(
+            f"updateProgress({progress}, {json.dumps(text, ensure_ascii=False)})"
         )
 
     def _on_game_launched(self):

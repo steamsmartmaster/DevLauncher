@@ -6541,9 +6541,14 @@
         function updateProgress(progress, text) {
             var panel = document.getElementById('downloadProgressPanel');
             var fill = document.getElementById('progressFill');
+
             panel.style.display = 'block';
             document.getElementById('downloadProgressTitle').textContent = text || '正在下载...';
+            document.getElementById('downloadProgressCount').textContent =
+                progress >= 0 ? Math.round(progress) + '%' : '';
+
             if (progress >= 0) {
+                fill.style.width = Math.round(progress) + '%';
                 fill.style.animation = 'none';
             } else {
                 // Indeterminate progress (file downloads)
