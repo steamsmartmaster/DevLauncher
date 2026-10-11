@@ -20,7 +20,7 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed `
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed' }
 
 # 3) 组装发布 zip：exe + 示例插件 + 更新日志
-$tag = 'b1.1'
+$tag = 'b1.2'
 $zipName = "DevLauncher-$tag-win64.zip"
 $stage = Join-Path $env:TEMP "devlauncher-build-$tag"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
