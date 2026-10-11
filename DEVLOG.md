@@ -432,3 +432,15 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 **验证**：`tests/test_download_progress.js` RED（10 FAIL）→ GREEN；权重公式探针 libs 0→60%、assets 60→99% 单调；全套 **pytest 196 + JS 821/0 + node --check 0 + py_compile rc=0 → ALL_PASS**。未提交，等用户发话。
 
 **构建（同日）**：`build_exe.ps1` 一键通过 → `dist\DevLauncher.exe` 207,557,169 字节（FileVersion 1.1.5.0 / ProductName DevLauncher，图标已嵌入）+ `dist\DevLauncher-b1.1-win64.zip` 206,522,220 字节。冒烟 30s 存活且日志在窗口内有写入（918 个版本、versionsLoaded 已发）。
+
+### LiquidBounce 客户端下载失败 + 客户端下载无百分比（2026-10-11）
+
+**根因**：`logs\launcher.log:116377` 钉死 —— `Download failed: ('Connection broken: IncompleteRead(7729536 bytes read, 16568536 more expected)', ...)`。LiquidBounce 走的 `ccbluex-api-private.s3...` 预签名直链 24 MB zip 下到 7.7 MB 断流，而 `launcher_core/api_modrinth.py:download_file` **零重试零续传**，单次异常即 `return False` → `main.py` 抛 `文件下载失败` → `下载客户端条目失败`，整单判死。S3 大对象预签名链路偶发断流是常态，一次失败即终局是缺陷而非环境问题。
+
+同一现象还盖住第二个独立缺陷：用户看到进度面板但**没有任何百分比**。`main.py` 的 `dl_cb` 只调 `report()`，而三处 `button_detail`（整合包/内容文件/客户端 zip）都不含 `current`/`total`；JS `updateLaunchButton` 的 `installing` 分支只认 `detail.file_total`（此处恒为 0）→ 落进条纹分支并把 `downloadProgressCount` 清空。其余四条下载路径（`main.py:1151/1755/2010/2117`）都额外 emit `progressUpdate` 走已修好的 `updateProgress`（百分比 + 条纹分流），唯独客户端 zip 这条漏了。
+
+**实现**：
+- `launcher_core/api_modrinth.py`：`download_file` 拆出 `_download_attempt`，外层按 `DOWNLOAD_RETRIES = 3` 重试。落盘改走 `dest.part` 临时文件 + 成功后 `os.replace`，避免半截产物被当成品装进实例。重试带 `Range: bytes=N-` 续传；`status_code == 416` 清空重来；服务器忽略 Range 回 200 时必须从头 `wb`，否则追加会拼出坏文件。进度回调按 `min(1.0, downloaded/total_all)` 保持单调。三次全败才删残留并返回 False。
+- `main.py` `dl_cb`：补 `self.progressUpdate.emit(pct, ...)`，与其余四条路径对齐，进度面板走 `updateProgress` 的百分比分支。
+
+**验证**：红→绿 TDD —— `tests/test_download_retry.py` 新建 6 用例 RED **5F/1P**（续传、服务器忽略 Range、三次全败清理、单发成功、常量存在性、`dl_cb` 含 `progressUpdate.emit`）→ 实现后 **6/6 GREEN**；全套回归 **pytest 196 → 202 passed + JS 821/0 + py_compile rc=0 → ALL_PASS**。

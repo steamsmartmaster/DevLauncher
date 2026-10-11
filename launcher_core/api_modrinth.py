@@ -1,12 +1,16 @@
 """Modrinth API client"""
 import json
 import logging
+import os
 import requests
 from typing import Optional
 
 logger = logging.getLogger("DevLauncher")
 
 BASE_URL = "https://api.modrinth.com/v2"
+
+# 大文件（整合包/客户端 jar+zip）中途断流的重试次数
+DOWNLOAD_RETRIES = 3
 
 # Facet types for different content
 PROJECT_TYPES = {
@@ -218,25 +222,63 @@ class ModrinthAPI:
             return None
 
     def download_file(self, url: str, dest_path: str, callback=None) -> bool:
-        """Download a file"""
-        try:
-            resp = self.session.get(url, stream=True, timeout=60)
-            resp.raise_for_status()
-            total = int(resp.headers.get('content-length', 0))
-            downloaded = 0
+        """Download a file.
 
-            with open(dest_path, 'wb') as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if callback and total > 0:
-                        callback(downloaded / total)
+        OVH/S3 预签名大文件实测会中途 IncompleteRead，单次失败不该判死，
+        所以按 Range 从断点续传重试；三次仍断则删掉半截文件避免被当成品。
+        """
+        tmp_path = dest_path + ".part"
+        for attempt in range(1, DOWNLOAD_RETRIES + 1):
+            try:
+                self._download_attempt(url, tmp_path, callback, attempt > 1)
+                os.replace(tmp_path, dest_path)
+                logger.info(f"Downloaded: {dest_path}")
+                return True
+            except Exception as e:
+                logger.error(
+                    f"Download failed (attempt {attempt}/{DOWNLOAD_RETRIES}): {e}")
+        for p in (tmp_path, dest_path):
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except OSError:
+                pass
+        return False
 
-            logger.info(f"Downloaded: {dest_path}")
-            return True
-        except Exception as e:
-            logger.error(f"Download failed: {e}")
-            return False
+    def _download_attempt(self, url: str, tmp_path: str, callback,
+                           allow_resume: bool):
+        """One GET pass writing to tmp_path; raises on any failure."""
+        start = 0
+        headers = {}
+        mode = "wb"
+        if allow_resume and os.path.exists(tmp_path):
+            start = os.path.getsize(tmp_path)
+            if start:
+                headers["Range"] = f"bytes={start}-"
+                mode = "ab"
+
+        resp = self.session.get(url, stream=True, timeout=60, headers=headers)
+        if resp.status_code == 416:
+            # Range 起点已在文件末尾之外：清空重下
+            os.remove(tmp_path)
+            resp.close()
+            return self._download_attempt(url, tmp_path, callback, False)
+        resp.raise_for_status()
+        if start and resp.status_code != 206:
+            # 服务器忽略 Range 回了全量，必须从头写否则拼接出坏文件
+            start, mode = 0, "wb"
+
+        total = int(resp.headers.get("content-length", 0) or 0)
+        total_all = start + total
+        downloaded = start
+        with open(tmp_path, mode) as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                if not chunk:
+                    continue
+                f.write(chunk)
+                downloaded += len(chunk)
+                if callback and total_all > 0:
+                    callback(min(1.0, downloaded / total_all))
 
 
 # Singleton

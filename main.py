@@ -1634,7 +1634,10 @@ class LauncherBridge(QObject):
 
                 def dl_cb(p):
                     # 88→100 单调推进，避免进度条回跳
-                    report(int(88 + (p or 0) * 12), 100, f"正在下载 {filename}...")
+                    pct = int(88 + (p or 0) * 12)
+                    report(pct, 100, f"正在下载 {filename}...")
+                    # report 的 button_detail 不带 current/total，JS 只会走条纹分支
+                    self.progressUpdate.emit(pct, f"正在下载 {filename}...")
 
                 if not modrinth_api.download_file(url, str(dest), callback=dl_cb):
                     raise RuntimeError(f"文件下载失败: {url}")
