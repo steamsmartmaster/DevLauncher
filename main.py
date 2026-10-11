@@ -19,7 +19,7 @@ os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = merge_chromium_flags(
 from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineScript
 from PyQt6.QtCore import QUrl, pyqtSlot, QObject, pyqtSignal, QTimer
 from PyQt6.QtWebChannel import QWebChannel
 
@@ -33,6 +33,7 @@ except ImportError:
 from launcher_core import AuthManager, VersionManager, GameLauncher, Settings, ModManager, modrinth_api, curseforge_api
 from launcher_core.plugins import PluginManager
 from launcher_core import clients_catalog
+from launcher_core import api_liquidbounce
 from launcher_core.api_github import github_api
 from launcher_core.api_meteor import meteor_api
 from launcher_core.api_modloaders import (
@@ -41,7 +42,6 @@ from launcher_core.api_modloaders import (
     get_installed_loaders, ModLoaderVersion
 )
 from launcher_core.modpack_importer import ModpackImporter, ModpackInfo
-from launcher_core.mod_manager import remove_stale_client_mods
 
 
 # === 日志配置 ===
@@ -223,29 +223,6 @@ class LauncherBridge(QObject):
         logger.info("获取版本列表...")
         def _do_load():
             try:
-                version_list = self.versions.get_version_list()
-                installed = self.versions.get_installed_versions()
-                logger.info(f"获取到 {len(version_list)} 个版本, 已安装 {len(installed)} 个")
-                
-                installed_ids = {v["id"] for v in installed}
-                
-                official_ids = {v['id'] for v in version_list}
-                for v in version_list:
-                    v['installed'] = v['id'] in installed_ids
-                    if 'releaseTime' in v and hasattr(v['releaseTime'], 'isoformat'):
-                        v['releaseTime'] = v['releaseTime'].isoformat()
-                    elif 'releaseTime' in v:
-                        v['releaseTime'] = str(v['releaseTime'])
-                
-                for v in installed:
-                    if v['id'] not in official_ids:
-                        v['installed'] = True
-                        v['type'] = v.get('type', 'unknown')
-                        v['releaseTime'] = v.get('releaseTime', '')
-                        version_list.append(v)
-                
-                json_data = json.dumps(version_list)
-                self.versionsLoaded.emit(json_data)
             except Exception as e:
                 logger.error(f"获取版本列表失败: {e}", exc_info=True)
                 self.errorOccurred.emit(str(e))
@@ -644,8 +621,6 @@ class LauncherBridge(QObject):
                 file_count[0] += 1
                 current_file[0] = status
                 logger.info(f"安装状态 [{file_count[0]}]: {status}")
-                # Show file count as progress indicator
-                self.progressUpdate.emit(-1, f"[{file_count[0]}] {status}")
 
             try:
                 self.gameStateChanged.emit("installing", f"正在安装 {version_id}...")
@@ -1633,16 +1608,29 @@ class LauncherBridge(QObject):
         self._client_web_win.raise_()
         self._client_web_win.activateWindow()
         logger.info(f"内置网页下载窗口: {client_id} <- {entry['endpoint']}")
+        if entry["id"] == "liquidbounce":
+            # 静态 endpoint 是回退入口；后台解析官方构建 API 取最新 release
+            # 的 queue 页（用户点开时永远是最新 jar），主线程经信号切换
+            win = self._client_web_win
+
+            def _resolve():
+                latest = api_liquidbounce.fetch_latest_build(release_only=True)
+                if latest and latest != entry["endpoint"]:
+                    try:
+                        win.navigateTo.emit(latest)
+                        logger.info(f"LiquidBounce 最新构建页: {latest}")
+                    except RuntimeError:
+                        pass  # 窗口已销毁
+
+            threading.Thread(target=_resolve, daemon=True).start()
 
     def startWebClientDownload(self, client_id: str, url: str, filename: str = ""):
-        """网页窗口捕获的 .jar 直链 → 复用 downloadClientVersion 安装管线"""
         entry = clients_catalog.get_entry(client_id)
         if not entry or entry.get("strategy") != "web_download":
             return
         if not url.startswith("http"):
             self.errorOccurred.emit(f"非法下载直链: {url}")
             return
-        logger.info(f"接管网页 jar 下载: {client_id} <- {url}")
         self._web_jar_pending = {"url": url, "filename": filename or ""}
         self.downloadClientVersion(client_id, url, "")
 
@@ -2537,12 +2525,10 @@ class LauncherBridge(QObject):
 
 
 class ClientWebPage(QWebEnginePage):
-    """内置下载页：.jar 直链导航不交给页面，改发信号由窗口接管"""
 
     jarLinkDetected = pyqtSignal(str)
 
     def acceptNavigationRequest(self, url: QUrl, nav_type, is_main_frame: bool) -> bool:
-        if url.url().split("?")[0].lower().endswith(".jar"):
             self.jarLinkDetected.emit(url.url())
             return False
         return super().acceptNavigationRequest(url, nav_type, is_main_frame)
@@ -2551,9 +2537,9 @@ class ClientWebPage(QWebEnginePage):
 class ClientWebWindow(QMainWindow):
     """web_download 条目的站内选版本网页窗口（独立 off-the-record profile）。
 
-    页面发起的 .jar 下载 → 取消 Chromium 下载项 → startWebClientDownload
-    复用客户端安装管线 → 关闭窗口；非 .jar 下载一律取消。
     """
+
+    navigateTo = pyqtSignal(str)
 
     def __init__(self, bridge, client_id: str, url: str, title: str = ""):
         super().__init__()
@@ -2562,12 +2548,26 @@ class ClientWebWindow(QMainWindow):
         self.setWindowTitle(f"{title or client_id} - 下载")
         self.resize(1100, 760)
         self._profile = QWebEngineProfile(self)
+        # 官方站点按 window.__TAURI__ 存在性隐藏导航/页脚（同官方 LiquidLauncher 观感）；
+        # 已核验全部前端包仅做展示切换、无任何 Tauri API 调用，注入探针安全
+        self._probe = QWebEngineScript()
+        self._probe.setName("lb-tauri-probe")
+        self._probe.setSourceCode("window.__TAURI__ = {};")
+        self._probe.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
+        self._profile.scripts().insert(self._probe)
         self._page = ClientWebPage(self._profile, self)
         self._page.jarLinkDetected.connect(self._on_jar_link)
         self._profile.downloadRequested.connect(self._on_download_requested)
         self._view = QWebEngineView(self)
         self._view.setPage(self._page)
         self.setCentralWidget(self._view)
+        # 后台线程解析最新构建后经此信号切页（跨线程 emit 自动排队到主线程）
+        self.navigateTo.connect(self._on_navigate)
+        self._view.setUrl(QUrl(url))
+
+    def _on_navigate(self, url: str):
+        if not url.startswith("http"):
+            return
         self._view.setUrl(QUrl(url))
 
     def _on_jar_link(self, url: str):
@@ -2575,15 +2575,21 @@ class ClientWebWindow(QMainWindow):
 
     def _on_download_requested(self, download):
         url = download.url().url()
-        is_jar = url.split("?")[0].lower().endswith(".jar")
-        suggested = download.suggestedFilename() or os.path.basename(urlparse(url).path)
         download.cancel()
-        if is_jar:
             self._handoff(url, suggested)
 
     def _handoff(self, url: str, filename: str):
         self._bridge.startWebClientDownload(self._client_id, url, filename)
         self.close()
+
+    def closeEvent(self, event):
+        # 释放顺序契约：profile 先于 page 销毁会触发 Qt
+        # "Release of profile requested but WebEnginePage still not deleted"；
+        # setPage(None) 让 view 自建内部页接管后才可安全删旧 page/profile
+        self._view.setPage(None)
+        self._page.deleteLater()
+        self._profile.deleteLater()
+        super().closeEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -2723,7 +2729,6 @@ class MainWindow(QMainWindow):
     def _on_progress_update(self, progress: float, text: str):
         logger.debug(f"信号: progressUpdate - {progress:.1f}% {text}")
         self.web_view.page().runJavaScript(
-            f"updateProgress({progress}, '{text}')"
         )
 
     def _on_game_launched(self):

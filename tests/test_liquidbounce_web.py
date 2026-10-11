@@ -16,6 +16,26 @@ def test_liquidbounce_entry_web_download():
     assert e["icon"] and not e["icon"].startswith("http")
 
 
+def test_tauri_probe_hides_site_chrome():
+    """ClientWebWindow 注入 __TAURI__ 探针 → 官网按官方 LiquidLauncher 逻辑隐藏导航/页脚。
+    官网仅用该全局做展示切换（root.js），无任何 Tauri API 调用（已核验全部前端包）。
+    """
+    src = (ROOT / "main.py").read_text(encoding="utf-8")
+    m = re.search(r"class ClientWebWindow[\s\S]{0,3000}?(?=\nclass )", src)
+    assert m, "ClientWebWindow 类应存在"
+    body = m.group(0)
+    assert "__TAURI__" in body, "窗口应注入 window.__TAURI__ 探针"
+    assert "QWebEngineScript" in body, "应使用 QWebEngineScript 注入"
+    assert "DocumentCreation" in body, "应在 DocumentCreation 注入（页面脚本前；Qt 枚举无 DocumentStart）"
+    assert "scripts().insert(" in body, "脚本应挂到 profile.scripts()"
+    # QWebEngineScript 仅存在这些 setter；setRunOnEveryDocument 属 Qt WebKit(QWebScript)
+    # 命名空间，PyQt6 上调用即 AttributeError 崩线程（曾致点下载即崩）
+    allowed = {"setName", "setSourceCode", "setInjectionPoint",
+               "setWorldId", "setRunsOnSubFrames", "setBaseUrl"}
+    called = set(re.findall(r"self\._probe\.(\w+)\(", body))
+    assert called <= allowed, f"探针调用了 QWebEngineScript 不存在的 API: {called - allowed}"
+
+
 def test_main_py_web_download_flow_static():
     src = (ROOT / "main.py").read_text(encoding="utf-8")
     assert re.search(r"@pyqtSlot\(str\)\s+def openClientWebPage\(self, client_id: str\)", src), \
@@ -23,6 +43,29 @@ def test_main_py_web_download_flow_static():
     assert "class ClientWebWindow" in src, "应有内置网页下载窗口类"
     assert "class ClientWebPage" in src, "应有拦截 .jar 导航的 Page 子类"
     assert "downloadRequested.connect" in src, "应接 profile.downloadRequested 拦截下载"
+
+
+def test_open_client_web_page_resolves_latest_build():
+    """打开 LiquidBounce 网页时后台解析官方构建 API → 切到最新 release 的 queue 页。
+
+    静态 #manual 入口保留为回退（API 失败/超时时窗口仍可用）。
+    """
+    src = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert "from launcher_core import api_liquidbounce" in src, "应导入官方构建 API 模块"
+    m = re.search(
+        r"def openClientWebPage\(self[\s\S]*?(?=\n    def startWebClientDownload)", src)
+    assert m, "openClientWebPage 槽应存在"
+    body = m.group(0)
+    assert "fetch_latest_build" in body, "应拉取最新构建下载页 URL"
+    assert "threading.Thread" in body, "网络解析必须在后台线程（阻塞操作不进 UI 线程）"
+    assert 'entry["endpoint"]' in body, "静态 endpoint 仍是窗口初始/回退入口"
+    w = re.search(r"class ClientWebWindow[\s\S]{0,3500}?(?=\nclass )", src)
+    assert w, "ClientWebWindow 类应存在"
+    wb = w.group(0)
+    assert "navigateTo" in wb, "ClientWebWindow 应有跨线程导航信号"
+    assert "pyqtSignal(str)" in wb, "导航信号应为 pyqtSignal(str)"
+    assert "navigateTo.connect" in wb, "信号应接到切页槽"
+    assert "acceptNavigationRequest" in src, "应覆写 acceptNavigationRequest 拦截直链"
     assert "startWebClientDownload" in src, "应有接管下载入口 startWebClientDownload"
     m = re.search(r"def downloadClientVersion\(self[\s\S]{0,14000}", src)
     assert m, "downloadClientVersion 应存在"
