@@ -1788,7 +1788,7 @@
             inset: 0;
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain;
         }
 
         .client-icon-fallback {
@@ -4386,7 +4386,7 @@
             var items = clientsData.filter(function(c) {
                 if (clientsType !== 'all' && c.type !== clientsType) return false;
                 if (clientsQuery) {
-                    var hay = ((c.name || '') + ' ' + (c.id || '') + ' ' + (c.note || '') + ' ' + (c.category || '')).toLowerCase();
+                    var hay = ((c.name || '') + ' ' + (c.id || '') + ' ' + (c.note || '') + ' ' + (c.tags || []).join(' ')).toLowerCase();
                     if (hay.indexOf(clientsQuery) < 0) return false;
                 }
                 return true;
@@ -4414,7 +4414,9 @@
                 (c.icon ? '<img class="client-icon-img" src="' + escapeAttr(c.icon) + '" alt="" onload="this.parentNode.classList.add(\'icon-loaded\')" onerror="this.remove()">' : '') +
                 '<span class="client-icon-fallback">' + ((c.name || '?').charAt(0)) + '</span></div>';
             var typeBadge = c.type === 'pack' ? '<span class="client-badge pack">模组包</span>' : '<span class="client-badge">客户端</span>';
-            var catBadge = c.category ? '<span class="client-badge cat">' + escapeHtml(c.category) + '</span>' : '';
+            var catBadge = (c.tags || []).map(function(t) {
+                return '<span class="client-badge cat">' + escapeHtml(t) + '</span>';
+            }).join('');
             var platformBadge = '<span class="client-badge">' + (c.platform || '') + '</span>';
             return '<div class="client-card" data-client-id="' + c.id + '">' +
                 '<div class="client-card-top">' + iconHtml +
@@ -6539,14 +6541,9 @@
         function updateProgress(progress, text) {
             var panel = document.getElementById('downloadProgressPanel');
             var fill = document.getElementById('progressFill');
-            
             panel.style.display = 'block';
             document.getElementById('downloadProgressTitle').textContent = text || '正在下载...';
-            document.getElementById('downloadProgressFile').textContent = '';
-            document.getElementById('downloadProgressCount').textContent = '';
-            
             if (progress >= 0) {
-                fill.style.width = progress + '%';
                 fill.style.animation = 'none';
             } else {
                 // Indeterminate progress (file downloads)

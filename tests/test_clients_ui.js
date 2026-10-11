@@ -45,7 +45,8 @@ if (cch) {
     check(/client-card-top/.test(cch), '卡片应有 client-card-top 头部行');
     check(/client-icon/.test(cch), '卡片应有 client-icon 图标区');
     check(/client-icon-fallback/.test(cch), '图标应有字母兜底 fallback');
-    check(/c\.category/.test(cch), '卡片应渲染 category 徽章');
+    check(/c\.tags/.test(cch), '卡片应渲染 tags 徽章');
+    check(/c\.tags\s*\|\|\s*\[\]/.test(cch), 'tags 缺失应容错空数组');
     check(/downloadClientWithPicker/.test(cch), '下载按钮应接 downloadClientWithPicker');
     check(/打开页面/.test(cch), 'open_page 条目应显示 打开页面');
     check(!/已下载/.test(cch), '卡片不应有永久「已下载」禁用态（完成态可重复下载）');
@@ -55,6 +56,8 @@ if (cch) {
     check(/onerror=/.test(cch), 'icon img 应保留 onerror 自愈');
 }
 check(/\.client-icon\s*\{/.test(html), 'CSS 应有 .client-icon 定义');
+check(/\.client-icon-img\s*\{[\s\S]{0,200}object-fit:\s*contain/.test(html),
+    '图标 img 应 object-fit: contain（宽 logo 不被方框裁切）');
 check(/\.client-icon\.icon-loaded[\s\S]{0,120}display:\s*none/.test(html),
     'CSS 应在 icon-loaded 时隐藏字母兜底（背景不透出）');
 check(/\.client-icon\.icon-loaded\s*\{[\s\S]{0,80}background:\s*transparent/.test(html),
@@ -204,13 +207,13 @@ function buildEnv() {
 }
 
 const CAT = [
-    { id: 'meteor', name: 'Meteor Client', type: 'client', category: '作弊-综合', platform: 'web', endpoint: 'https://meteorclient.com/api/download', strategy: 'meteor_download', kind: 'jar', note: '官网直下', icon: 'https://github.com/MeteorDevelopment.png?size=128' },
-    { id: 'liquidbounce', name: 'LiquidBounce', type: 'client', category: '作弊-PVP', platform: 'web', endpoint: 'https://liquidbounce.net/download', strategy: 'web_download', kind: 'jar', note: '内置网页下载', icon: '' },
-    { id: 'bleachhack', name: 'BleachHack', type: 'client', category: '作弊-综合', platform: 'github', endpoint: 'BleachDev/BleachHack', strategy: 'github_latest_jar', kind: 'jar', note: '多版本 jar', icon: 'https://github.com/BleachDev.png?size=128' },
-    { id: 'optix', name: 'Optix Client', type: 'client', category: 'PVP-竞技', platform: 'modrinth', endpoint: 'optixclient', strategy: 'modrinth_latest_jar', kind: 'jar', note: 'PVP 竞技', icon: '' },
-    { id: 'payload', name: 'Payload Utility Mod', type: 'client', category: '作弊-辅助', platform: 'web', endpoint: 'https://github.com/franktheory/Payload-Utility-Mod', strategy: 'open_page', kind: 'page', note: '打开仓库页', icon: '' },
-    { id: 'spunky-pvp-plus', name: 'Spunky PVP Plus', type: 'pack', category: '', platform: 'modrinth', endpoint: 'spunky-pvp-plus', strategy: 'modrinth_modpack', kind: 'modpack', note: 'PVP 整合包', icon: '' },
-    { id: 'ath', name: 'All The Hacks (ATH)', type: 'pack', category: '', platform: 'web', endpoint: 'https://www.modpackindex.com/modpack/149934/all-the-hacks-ath', strategy: 'open_page', kind: 'page', note: 'Modpack Index 页面', icon: '' }
+    { id: 'meteor', name: 'Meteor Client', type: 'client', tags: ['作弊'], platform: 'web', endpoint: 'https://meteorclient.com/api/download', strategy: 'meteor_download', kind: 'jar', note: '官网直下', icon: 'https://github.com/MeteorDevelopment.png?size=128' },
+    { id: 'liquidbounce', name: 'LiquidBounce', type: 'client', tags: ['作弊', 'PVP'], platform: 'web', endpoint: 'https://liquidbounce.net/download', strategy: 'web_download', kind: 'jar', note: '内置网页下载', icon: '' },
+    { id: 'bleachhack', name: 'BleachHack', type: 'client', tags: ['作弊'], platform: 'github', endpoint: 'BleachDev/BleachHack', strategy: 'github_latest_jar', kind: 'jar', note: '多版本 jar', icon: 'https://github.com/BleachDev.png?size=128' },
+    { id: 'optix', name: 'Optix Client', type: 'client', tags: ['PVP'], platform: 'modrinth', endpoint: 'optixclient', strategy: 'modrinth_latest_jar', kind: 'jar', note: 'PVP 竞技', icon: '' },
+    { id: 'payload', name: 'Payload Utility Mod', type: 'client', tags: ['作弊', '生存'], platform: 'web', endpoint: 'https://github.com/franktheory/Payload-Utility-Mod', strategy: 'open_page', kind: 'page', note: '打开仓库页', icon: '' },
+    { id: 'spunky-pvp-plus', name: 'Spunky PVP Plus', type: 'pack', tags: ['PVP'], platform: 'modrinth', endpoint: 'spunky-pvp-plus', strategy: 'modrinth_modpack', kind: 'modpack', note: 'PVP 整合包', icon: '' },
+    { id: 'ath', name: 'All The Hacks (ATH)', type: 'pack', tags: ['作弊', '生存'], platform: 'web', endpoint: 'https://www.modpackindex.com/modpack/149934/all-the-hacks-ath', strategy: 'open_page', kind: 'page', note: 'Modpack Index 页面', icon: '' }
 ];
 function mkCatalog() {
     // 13 client + 6 pack（与真实目录同构）
@@ -219,11 +222,11 @@ function mkCatalog() {
     const pks = CAT.filter(c => c.type === 'pack');
     for (let i = 0; i < 13; i++) {
         list.push(i < cli.length ? cli[i]
-            : { id: 'client' + i, name: 'Client ' + i, type: 'client', category: '', platform: 'modrinth', endpoint: 'slug' + i, strategy: 'modrinth_latest_jar', kind: 'jar', note: '', icon: '' });
+            : { id: 'client' + i, name: 'Client ' + i, type: 'client', tags: [], platform: 'modrinth', endpoint: 'slug' + i, strategy: 'modrinth_latest_jar', kind: 'jar', note: '', icon: '' });
     }
     for (let i = 0; i < 6; i++) {
         list.push(i < pks.length ? pks[i]
-            : { id: 'pack' + i, name: 'Pack ' + i, type: 'pack', category: '', platform: 'modrinth', endpoint: 'pk' + i, strategy: 'modrinth_modpack', kind: 'modpack', note: '', icon: '' });
+            : { id: 'pack' + i, name: 'Pack ' + i, type: 'pack', tags: [], platform: 'modrinth', endpoint: 'pk' + i, strategy: 'modrinth_modpack', kind: 'modpack', note: '', icon: '' });
     }
     return list;
 }
@@ -250,7 +253,7 @@ if (env.api) {
     const athSeg = htmlOut.split('data-client-id="ath"')[1] || '';
     check(athSeg.slice(0, 400).indexOf('client-icon-img') < 0, 'icon 为空条目不应渲染 img');
     check(htmlOut.indexOf('client-icon-fallback') >= 0, '应有字母兜底 fallback');
-    check(htmlOut.indexOf('作弊-综合') >= 0, '应渲染 category 徽章');
+    check(htmlOut.indexOf('作弊') >= 0 && htmlOut.indexOf('client-badge cat') >= 0, '应渲染 tags 徽章');
     check(htmlOut.indexOf('Meteor Client') >= 0 && htmlOut.indexOf('ATH') >= 0, '应含 Meteor Client 与 ATH');
     check(htmlOut.indexOf('打开页面') >= 0, 'open_page 条目应显示 打开页面');
     check(htmlOut.indexOf('openClientSite') >= 0, '打开页面应接 openClientSite');
@@ -284,7 +287,7 @@ if (env.api) {
     env.elements['clientSearch'].value = '作弊';
     env.api.filterClients();
     const catCards = (env.elements['clientsResults'].innerHTML.match(/data-client-id=/g) || []).length;
-    check(catCards === 4, '按分类「作弊」应命中 4 卡 (meteor/liquidbounce/bleachhack/payload), 实际 ' + catCards);
+    check(catCards === 5, '按标签「作弊」应命中 5 卡 (meteor/liquidbounce/bleachhack/payload/ath), 实际 ' + catCards);
     env.elements['clientSearch'].value = 'zzz-not-found';
     env.api.filterClients();
     const cards2 = (env.elements['clientsResults'].innerHTML.match(/data-client-id=/g) || []).length;
@@ -369,7 +372,7 @@ section('行为: web_download → 内置网页窗口（LiquidBounce）');
 env = buildEnv();
 if (env.api) {
     env.api.renderClientList(mkCatalog());
-    const lbCard = (env.elements['clientsResults'].innerHTML.split('data-client-id="liquidbounce"')[1] || '').slice(0, 400);
+    const lbCard = (env.elements['clientsResults'].innerHTML.split('data-client-id="liquidbounce"')[1] || '').slice(0, 600);
     check(lbCard.indexOf('LiquidBounce') >= 0, '应渲染 LiquidBounce 卡片');
     check(lbCard.indexOf('下载') >= 0, 'web_download 卡片应显示 下载（非打开页面）');
     env.api.downloadClientWithPicker('liquidbounce');

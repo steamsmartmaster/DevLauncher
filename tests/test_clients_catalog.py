@@ -10,8 +10,8 @@ STRATEGIES = {"github_latest_jar", "modrinth_latest_jar", "meteor_download",
               "web_download"}
 PLATFORMS = {"github", "modrinth", "curseforge", "web"}
 KINDS = {"jar", "modpack", "page"}
-CATEGORIES = {"作弊-综合", "作弊-辅助", "作弊-PVP", "PVP-竞技", "PVP-辅助"}
-FIELDS = ("id", "name", "type", "category", "platform", "endpoint",
+TAGS = {"作弊", "PVP", "生存"}
+FIELDS = ("id", "name", "type", "tags", "platform", "endpoint",
           "strategy", "note", "kind", "icon")
 
 
@@ -53,10 +53,10 @@ def test_catalog_composition_14_clients_6_packs():
     # ---- LiquidBounce：内置网页下载（web_download）----
     lb = by_id["liquidbounce"]
     assert lb["strategy"] == "web_download"
-    assert lb["endpoint"] == "https://liquidbounce.net/download"
+    assert lb["endpoint"] == "https://liquidbounce.net/download#manual"
     assert lb["type"] == "client" and lb["kind"] == "jar"
     assert lb["platform"] == "web"
-    assert lb["category"] == "作弊-PVP"
+    assert lb["tags"] == ["作弊", "PVP"]
     assert lb["icon"].startswith("static/icons/clients/liquidbounce")
 
     # ---- 14 客户端 ----
@@ -83,9 +83,16 @@ def test_catalog_composition_14_clients_6_packs():
     assert by_id["ath"]["strategy"] == "open_page"
     assert "modpackindex.com" in by_id["ath"]["endpoint"]
 
-    # ---- category：13 客户端 5 细分值，包为空 ----
-    assert {i["category"] for i in clients} == CATEGORIES
-    assert all(i["category"] == "" for i in packs)
+    # ---- tags：仅 作弊/PVP/生存 三标签，一条目可多标签 ----
+    assert set().union(*(set(i["tags"]) for i in items)) == TAGS
+    for i in items:
+        assert i["tags"], f"{i['id']} tags 不应为空"
+        assert set(i["tags"]) <= TAGS, f"{i['id']} 含非法标签 {i['tags']}"
+    assert by_id["combatant"]["tags"] == ["作弊", "PVP"]
+    assert by_id["travel"]["tags"] == ["作弊", "生存"]
+    assert by_id["fpsmaster"]["tags"] == ["PVP"]
+    assert by_id["ath"]["tags"] == ["作弊", "生存"]
+    assert all(i["tags"] == ["PVP"] for i in packs[:-1]), "5 个 PVP 包应仅 PVP"
 
     # ---- 清单外旧条目必须已移除（API 库 / 纯优化模组 / 旧包）----
     for gone in ("fabric-api", "sodium", "lithium", "iris", "entityculling",

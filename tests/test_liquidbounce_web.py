@@ -10,6 +10,8 @@ def test_liquidbounce_entry_web_download():
     e = cc.get_entry("liquidbounce")
     assert e is not None, "目录应含 liquidbounce 条目"
     assert e["strategy"] == "web_download"
+    # #manual 锚点直达 jar 构建列表（页顶是 LiquidLauncher 推广区，见 liquidbounce.net/download HTML）
+    assert e["endpoint"] == "https://liquidbounce.net/download#manual"
     assert e["kind"] == "jar" and e["type"] == "client"
     assert e["icon"] and not e["icon"].startswith("http")
 
