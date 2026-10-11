@@ -2313,6 +2313,8 @@ class LauncherBridge(QObject):
                         if item.is_file() and (item.suffix == ".jar" or item.suffix == ".disabled"):
                             jar_files.append(item)
                         elif item.is_dir():
+                            if item.name == "_removed_mods":
+                                continue
                             for sub_item in item.iterdir():
                                 if sub_item.is_file() and sub_item.suffix == ".jar":
                                     jar_files.append(sub_item)
