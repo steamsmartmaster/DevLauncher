@@ -204,7 +204,7 @@
 - [ ] 全新解压（无 logs/plugins 目录）首次启动不报错、目录按需自动生成
 - [ ] exe 环境下正常下载版本、启动游戏
 - [ ] 资源管理器中 DevLauncher.exe 显示**软件自定义图标**（深色圆角 D_ 标），非 PyInstaller 默认图标
-- [ ] 右键 exe → 属性 → 详细信息：文件版本 1.1.5.0、产品名称 DevLauncher
+- [ ] 右键 exe → 属性 → 详细信息：文件版本 1.2.0.0、产品名称 DevLauncher
 - [ ] 从浏览器下载 zip 解压后首跑触发 SmartScreen → "更多信息 → 仍要运行"可正常启动（或右键属性解除锁定）
 - [ ] 运行 1 分钟后任务管理器三进程（父+主+渲染）专用内存合计 ≈ 210MB 量级（优化前 275MB）；QtWebEngineProcess 命令行含 `--disable-gpu-compositing`
 
@@ -268,3 +268,18 @@
 - [ ] 设置 java_path 后启动游戏：日志出现「使用设置的 Java: ...」，游戏正常启动（命令首元素被替换）
 - [ ] 清空 java_path 后启动：回退 mll 自动/捆绑运行时，行为与旧版一致
 - [ ] 隐藏全部 Java 后扫描：空态提示恢复显示，不报错
+
+## 29. LiquidBounce queue 产物 zip 接管（2026-10-11 新增）
+- [ ] 内置网页窗口打开最新 release 的 queue 页，等倒计时后点 Download Now：不再卡「Your download should start shortly.」，窗口关闭且导入进度弹窗走实例安装管线
+- [ ] 日志出现「接管网页下载产物: liquidbounce <- https://...zip?X-Amz-...」，zip 下载后解包出 liquidbounce.jar 进实例 mods/，zip 不残留
+- [ ] 解包后 mods/ 出现 liquidbounce.jar（非 .zip），游戏可加载；重复下载旧版本 jar 被 remove_stale 清理
+- [ ] zip 内无 .jar 的异常包：报「压缩包内无 .jar」错误 toast，zip 保留在 mods/ 便于排查，不崩
+- [ ] 非客户端产物下载（广告等）仍被 cancel 且不落盘不接管
+
+## 30. 下载进度条（2026-10-11 新增）
+- [ ] 触发版本安装（选一个未安装的版本）：侧栏弹出进度面板，标题随文件状态滚动，进度条**实际在走**（不再停在 0%），百分比递增且不回跳
+- [ ] 无 assets 的旧版本安装：进度条推进到约 60% 后随安装完成收起，不卡死、不报错
+- [ ] Modrinth 搜索安装模组：进度面板显示百分比并推进到 100%，完成后收起
+- [ ] 下载整合包 zip / 内容文件：进度条随百分比推进
+- [ ] 状态文案含单引号或特殊字符的下载：进度调用不报错，条照常推进
+- [ ] 控制台（F12）无 `Cannot set properties of null` 报错

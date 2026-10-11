@@ -409,3 +409,26 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - `ui/index.html`：游戏设置组新增「已安装 Java」块（扫描按钮 + `#javaListItems` 列表 + `#javaListEmpty` 空态）；新函数 `scanJavas/setJavaPathValue/hideJavaPath/onJavasScanned/javaPathEdited`；两处同 id `#javaPath` 经 querySelectorAll 同步（updateSettingsUI 双写、onchange=javaPathEdited 镜像+保存）；`.java-row/.java-badge/.java-rec/.java-path-text` CSS；QWebChannel fallback 补 `scanJavas/hideJava` 空桩
 
 **验证**：红→绿 TDD —— `tests/test_java_scan.py` 新建 9 用例 RED（ImportError: cannot import name 'java_scan'）→ `java_scan.py` 落地后 6 pure GREEN + 3 static 红 → 接线后 **9/9**；`tests/test_java_ui.js` 新建 RED **0/14** → index.html 改造后 **33/0 GREEN**；全套回归 **pytest 172（163+9）+ JS 10 套 798/0 + node --check（提取 `<script>`）CHECK=0 + py_compile OK**；实施计划 `docs/plans/2026-10-08-java-scan.md`（含执行期偏差记录）。未提交，等用户发话。
+
+### LiquidBounce queue 页「should start shortly」不下载修复（2026-10-11）
+
+**根因（Playwright 实测官网全链路钉死）**：点 Download Now → React Router POST `/download/<id>/queue.data` → 202 `Location: api.liquidbounce.net/api/v3/file/<pid>` → 302 预签名 S3 直链（`ccbluex-api-private.s3.../versions/<pid>/liquidbounce-<sha>.zip?X-Amz-...`）→ Chromium `downloadRequested`，建议文件名 **`.zip`**。我方 `_on_download_requested` 只认 `.jar` 后缀 → `download.cancel()` 静默吞掉真实下载 → 页面永远停在「Your download should start shortly.」。附带：该 zip 是发行包（内含 `liquidbounce.jar` + FORUM.URL 等推广文本），直接落 mods/ 加载器不识别。旁证：curl 模拟 document POST 恒报「Download Session is not valid」——官网 action 只走 `.data` fetch 端点，document POST 是另一条校验路径，非 bug。
+
+**实现**：
+- `main.py`：`ClientWebPage.acceptNavigationRequest` 与 `ClientWebWindow._on_download_requested` 判定改 `.jar/.zip` 元组（query 仍先剥）；`_do_download` 下载成功后 zip 后缀 → `extract_client_mod_jar` 解包取 jar 再进 `remove_stale_client_mods`
+- `launcher_core/mod_manager.py` 新增 `extract_client_mod_jar(bundle)`：zip 内全部 .jar 平铺解到同目录（按 basename）、最大者为主 jar 返回、删 zip；无 .jar 抛 RuntimeError 且保留 zip 便于排查
+
+**验证**：红→绿 TDD —— `tests/test_mod_dedupe.py` 新增 3 解包用例 RED（ImportError）→ GREEN；`tests/test_liquidbounce_web.py` 新增 `test_zip_bundle_artifact_handoff_and_unpack` 静态时序（download_file → extract → remove_stale）+ 旧断言改元组 RED 2F → GREEN；全套 **pytest 196（192+4）+ JS 800/0 + node --check 0 + py_compile rc=0 → ALL_PASS**。未提交，等用户发话。
+
+### 下载进度条修复：updateProgress 幽灵元素 + 版本安装确定进度（2026-10-11）
+
+**根因**：`updateProgress` 里写入 `document.getElementById('downloadProgressFile')`，但 HTML 无此 id（全文件仅这一处 JS 引用）→ 空引用 `TypeError` 抛在 `fill.style.width` 之前 → 面板被显示出来，进度条却永远停在 0%。受影响的是全部走 `progressUpdate` 信号的流：版本安装、模组 jar 下载、内容下载、模组加载器安装、整合包 zip 下载（`updateModpackImportProgress` 是另一套独立实现，不受影响）。
+
+**实现**：
+- `ui/index.html` `updateProgress`：删掉对不存在元素的写入；`downloadProgressCount` 改为显示百分比（无百分比时清空）；宽度 `Math.round` 收敛，避免脏小数
+- `main.py _on_progress_update`：文案改 `json.dumps` 注入——文件名/库坐标含单引号会截断 JS 字面量，让整个进度调用再次静默失效
+- `main.py installVersion`：接 mll `setMax`/`setProgress`。mll 仅 libraries/assets 两段回调 `setMax`，两段按 0.6/0.4 权重拼成整体百分比（段间单调不回跳）；其 `setMax` 传 `len-1` 而计数到 `len`，故 frac clamp 到 [0,1]；整体封顶 99% 直到 installComplete 收尾
+
+**验证**：`tests/test_download_progress.js` RED（10 FAIL）→ GREEN；权重公式探针 libs 0→60%、assets 60→99% 单调；全套 **pytest 196 + JS 821/0 + node --check 0 + py_compile rc=0 → ALL_PASS**。未提交，等用户发话。
+
+**构建（同日）**：`build_exe.ps1` 一键通过 → `dist\DevLauncher.exe` 207,557,169 字节（FileVersion 1.1.5.0 / ProductName DevLauncher，图标已嵌入）+ `dist\DevLauncher-b1.1-win64.zip` 206,522,220 字节。冒烟 30s 存活且日志在窗口内有写入（918 个版本、versionsLoaded 已发）。

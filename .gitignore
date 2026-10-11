@@ -29,3 +29,5 @@ plugins/*/config.json
 build/
 dist/
 *.spec
+
+cache/
