@@ -42,6 +42,7 @@ from launcher_core.api_modloaders import (
     get_installed_loaders, ModLoaderVersion
 )
 from launcher_core.modpack_importer import ModpackImporter, ModpackInfo
+from launcher_core.mod_manager import extract_client_mod_jar, remove_stale_client_mods
 
 
 # === 日志配置 ===
@@ -1599,6 +1600,9 @@ class LauncherBridge(QObject):
 
                 if not modrinth_api.download_file(url, str(dest), callback=dl_cb):
                     raise RuntimeError(f"文件下载失败: {url}")
+                if dest.suffix.lower() == ".zip":
+                    dest = extract_client_mod_jar(dest)
+                    filename = dest.name
                 removed = remove_stale_client_mods(dest)
                 if removed:
                     logger.info(f"同 mod 旧版本已清理: {removed}")
@@ -1660,12 +1664,14 @@ class LauncherBridge(QObject):
             threading.Thread(target=_resolve, daemon=True).start()
 
     def startWebClientDownload(self, client_id: str, url: str, filename: str = ""):
+        """网页窗口捕获的客户端产物直链（.jar 或 zip 包）→ 复用安装管线"""
         entry = clients_catalog.get_entry(client_id)
         if not entry or entry.get("strategy") != "web_download":
             return
         if not url.startswith("http"):
             self.errorOccurred.emit(f"非法下载直链: {url}")
             return
+        logger.info(f"接管网页下载产物: {client_id} <- {url}")
         self._web_jar_pending = {"url": url, "filename": filename or ""}
         self.downloadClientVersion(client_id, url, "")
 
@@ -2560,10 +2566,12 @@ class LauncherBridge(QObject):
 
 
 class ClientWebPage(QWebEnginePage):
+    """内置下载页：.jar/.zip 直链导航不交给页面，改发信号由窗口接管"""
 
     jarLinkDetected = pyqtSignal(str)
 
     def acceptNavigationRequest(self, url: QUrl, nav_type, is_main_frame: bool) -> bool:
+        if url.url().split("?")[0].lower().endswith((".jar", ".zip")):
             self.jarLinkDetected.emit(url.url())
             return False
         return super().acceptNavigationRequest(url, nav_type, is_main_frame)
@@ -2572,6 +2580,8 @@ class ClientWebPage(QWebEnginePage):
 class ClientWebWindow(QMainWindow):
     """web_download 条目的站内选版本网页窗口（独立 off-the-record profile）。
 
+    页面发起的 .jar/.zip 下载 → 取消 Chromium 下载项 → startWebClientDownload
+    复用客户端安装管线（zip 解包取 jar）→ 关闭窗口；其余下载一律取消。
     """
 
     navigateTo = pyqtSignal(str)
@@ -2610,7 +2620,11 @@ class ClientWebWindow(QMainWindow):
 
     def _on_download_requested(self, download):
         url = download.url().url()
+        # 官网 S3 直链产物是 .zip（包内 liquidbounce.jar），只认 .jar 会静默 cancel 真实下载
+        is_artifact = url.split("?")[0].lower().endswith((".jar", ".zip"))
+        suggested = download.suggestedFileName() or os.path.basename(urlparse(url).path)
         download.cancel()
+        if is_artifact:
             self._handoff(url, suggested)
 
     def _handoff(self, url: str, filename: str):

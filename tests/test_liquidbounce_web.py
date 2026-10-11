@@ -67,6 +67,9 @@ def test_open_client_web_page_resolves_latest_build():
     assert "navigateTo.connect" in wb, "信号应接到切页槽"
     assert "acceptNavigationRequest" in src, "应覆写 acceptNavigationRequest 拦截直链"
     assert "startWebClientDownload" in src, "应有接管下载入口 startWebClientDownload"
+    # 官网 S3 直链产物是 .zip（zip 包内含 liquidbounce.jar），只认 .jar 会把真实下载
+    # cancel 掉 → 页面永远停在「Your download should start shortly.」
+    assert 'endswith((".jar", ".zip"))' in src, "拦截应按 .jar/.zip 判定"
     m = re.search(r"def downloadClientVersion\(self[\s\S]{0,14000}", src)
     assert m, "downloadClientVersion 应存在"
     body = m.group(0)
@@ -127,3 +130,53 @@ def test_no_external_browser_for_web_download():
     body = m.group(0)
     assert "webbrowser.open" not in body, "内置网页窗口不应走外部浏览器"
     assert "ClientWebWindow" in body
+
+
+def test_zip_bundle_artifact_handoff_and_unpack():
+    """实测（Playwright 点击官网 Download Now）：queue.data 202 → api/v3/file/<pid>
+    → 302 预签名 S3 直链以 .zip 结尾（包内 liquidbounce.jar + 推广 URL 文本）。
+    拦截必须认 .zip，且安装管线须解包取 jar（zip 进 mods/ 加载器不识别）。"""
+    src = (ROOT / "main.py").read_text(encoding="utf-8")
+    nav = re.search(r"class ClientWebPage[\s\S]*?(?=\nclass )", src)
+    assert nav and 'endswith((".jar", ".zip"))' in nav.group(0), \
+        "acceptNavigationRequest 应拦 .zip 直链"
+    dl = re.search(r"def _on_download_requested\(self[\s\S]*?(?=\n    def _handoff)", src)
+    assert dl and 'endswith((".jar", ".zip"))' in dl.group(0), \
+        "_on_download_requested 应接管 .zip 下载（否则 cancel 后无任何提示）"
+    assert "extract_client_mod_jar(" in src, "zip 产物应走解包提取"
+    m = re.search(r"def downloadClientVersion\(self[\s\S]*?remove_stale_client_mods\(", src)
+    assert m, "下载编排应以解包产物接去重"
+    body = m.group(0)
+    assert body.index("download_file(") < body.index("extract_client_mod_jar(") < body.rindex("remove_stale_client_mods("), \
+        "顺序应为 下载 zip → 解包 jar → 同 mod 去重"
+
+
+def test_download_request_api_whitelist():
+    """QWebEngineDownloadRequest 属 Qt WebEngine 命名空间：正确方法是
+    suggestedFileName（大写 N）；suggestedFilename 是 Qt WebKit(QWebDownloadItem)
+    名字，PyQt6 上调用即 AttributeError 崩 .jar 接管管线（曾复现于实机日志）。"""
+    src = (ROOT / "main.py").read_text(encoding="utf-8")
+    m = re.search(
+        r"def _on_download_requested\(self[\s\S]*?(?=\n    def _handoff)", src)
+    assert m, "_on_download_requested 应存在"
+    body = m.group(0)
+    called = set(re.findall(r"download\.(\w+)\(", body))
+    assert called <= {"url", "cancel", "suggestedFileName"}, \
+        f"调用了 QWebEngineDownloadRequest 不存在的 API: {called - {'url', 'cancel', 'suggestedFileName'}}"
+    assert "suggestedFilename(" not in body, "禁止 WebKit 命名的 suggestedFilename"
+
+
+def test_close_releases_page_before_profile():
+    """ClientWebWindow 关闭时须先摘 QWebEnginePage 再释放 QWebEngineProfile，
+    否则 Qt 告警 "Release of profile requested but WebEnginePage still not
+    deleted. Expect troubles !"（实机日志复现）。"""
+    src = (ROOT / "main.py").read_text(encoding="utf-8")
+    m = re.search(r"class ClientWebWindow[\s\S]{0,4500}?(?=\nclass )", src)
+    assert m, "ClientWebWindow 类应存在"
+    body = m.group(0)
+    assert "def closeEvent" in body, "应有 closeEvent 显式释放顺序"
+    i_page_none = body.index("setPage(None)")
+    i_page_del = body.index("_page.deleteLater()")
+    i_prof_del = body.index("_profile.deleteLater()")
+    assert i_page_none < i_page_del < i_prof_del, \
+        "释放顺序必须 setPage(None) → page.deleteLater() → profile.deleteLater()"

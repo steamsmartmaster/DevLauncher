@@ -330,6 +330,26 @@ def remove_stale_client_mods(new_jar) -> list[str]:
     return removed
 
 
+def extract_client_mod_jar(bundle) -> Path:
+    """Unpack a client download bundle and return the extracted primary jar.
+
+    LiquidBounce's S3 artifact is a zip (liquidbounce.jar + promo URL text
+    files); Fabric only loads .jar from mods/, so every jar is unpacked flat
+    next to the bundle and the zip removed. Raises if the zip has no jar.
+    """
+    bundle = Path(bundle)
+    with zipfile.ZipFile(bundle) as zf:
+        jars = [n for n in zf.namelist()
+                if not n.endswith("/") and n.lower().endswith(".jar")]
+        if not jars:
+            raise RuntimeError(f"压缩包内无 .jar: {bundle.name}")
+        primary = max(jars, key=lambda n: zf.getinfo(n).file_size)
+        for name in jars:
+            (bundle.parent / os.path.basename(name)).write_bytes(zf.read(name))
+    bundle.unlink()
+    return bundle.parent / os.path.basename(primary)
+
+
 class ModManager:
     """Manage mods in a .minecraft/mods directory"""
     
