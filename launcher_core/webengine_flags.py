@@ -25,7 +25,56 @@ def _env_proxy() -> str:
         value = (os.environ.get(key) or "").strip()
         if value:
             return value
+    system = _read_system_proxy()
+    if system and "://" not in system:
+        system = "http://" + system
+    return system
+
+
+def parse_ie_proxy(raw: str) -> str:
+    """WinINET ProxyServer 归一到 host:port。
+
+    系统代理有两种形态：全协议单值 `host:port`，或分号键值对
+    `http=h:p;https=h:p;socks=h:p`。键值对里按 https > socks > http 取，
+    因为 QtWebEngine 只走 HTTPS 出站。"""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    if "=" not in s:
+        return s
+    picked = {}
+    for part in s.split(";"):
+        if "=" not in part:
+            continue
+        k, _, v = part.partition("=")
+        picked[k.strip().lower()] = v.strip()
+    for key in ("https", "socks", "http"):
+        if picked.get(key):
+            return picked[key]
     return ""
+
+
+def _read_system_proxy() -> str:
+    """回退读 Windows WinINET 系统代理（浏览器共用的那套设置）。
+
+    双击启动 app 时环境变量为空，而浏览器能连是因为读了注册表里的
+    ProxyEnable/ProxyServer。这里补齐同一来源，否则 QtWebEngine 直连超时。"""
+    if os.name != "nt":
+        return ""
+    try:
+        import winreg
+    except ImportError:
+        return ""
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            enabled, _ = winreg.QueryValueEx(key, "ProxyEnable")
+            if not enabled:
+                return ""
+            raw, _ = winreg.QueryValueEx(key, "ProxyServer")
+    except OSError:
+        return ""
+    return parse_ie_proxy(raw)
 
 
 def merge_chromium_flags(existing=None) -> str:
