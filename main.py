@@ -46,6 +46,7 @@ from launcher_core.modpack_importer import ModpackImporter, ModpackInfo
 
 # === 日志配置 ===
 from launcher_core.paths import app_base_dir
+from launcher_core.versions import load_version_cache, save_version_cache
 
 LOG_DIR = app_base_dir() / "logs"
 try:
@@ -221,8 +222,42 @@ class LauncherBridge(QObject):
     def getVersions(self):
         """Get list of versions (threaded)"""
         logger.info("获取版本列表...")
+        cache_path = Path(app_base_dir()) / "cache" / "version_manifest.json"
+
+        def _build_json(version_list):
+            installed = self.versions.get_installed_versions()
+            logger.info(f"获取到 {len(version_list)} 个版本, 已安装 {len(installed)} 个")
+            installed_ids = {v["id"] for v in installed}
+            official_ids = {v['id'] for v in version_list}
+            for v in version_list:
+                v['installed'] = v['id'] in installed_ids
+                if 'releaseTime' in v and hasattr(v['releaseTime'], 'isoformat'):
+                    v['releaseTime'] = v['releaseTime'].isoformat()
+                elif 'releaseTime' in v:
+                    v['releaseTime'] = str(v['releaseTime'])
+            for v in installed:
+                if v['id'] not in official_ids:
+                    v['installed'] = True
+                    v['type'] = v.get('type', 'unknown')
+                    v['releaseTime'] = v.get('releaseTime', '')
+                    version_list.append(v)
+            return json.dumps(version_list)
+
         def _do_load():
             try:
+                cached = load_version_cache(cache_path)
+                if cached:
+                    # 冷启动先用磁盘缓存立即渲染，随后联网刷新且内容有变再发第二次覆盖
+                    self.versionsLoaded.emit(_build_json(list(cached)))
+                try:
+                    fresh = self.versions.fetch_version_list(timeout=10)
+                    save_version_cache(fresh, cache_path)
+                    if fresh != cached:
+                        self.versionsLoaded.emit(_build_json(fresh))
+                except Exception as fe:
+                    if not cached:
+                        raise
+                    logger.warning(f"版本清单刷新失败，沿用缓存: {fe}")
             except Exception as e:
                 logger.error(f"获取版本列表失败: {e}", exc_info=True)
                 self.errorOccurred.emit(str(e))

@@ -7,8 +7,29 @@ from typing import Optional
 from pathlib import Path
 
 import minecraft_launcher_lib
+import requests
 
 logger = logging.getLogger("DevLauncher")
+
+VERSION_MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
+
+
+def load_version_cache(path) -> Optional[list]:
+    """读磁盘版本清单缓存；缺失/损坏/非列表返回 None"""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, list) else None
+
+
+def save_version_cache(data: list, path) -> None:
+    """原子写版本清单缓存（tmp+replace，防崩溃截断成半个 JSON）"""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(p)
 
 # 版本管理页"文件目录"识别映射: 键序即列表排序序; 未识别的文件夹显示原名
 FOLDER_LABELS = {
@@ -83,6 +104,15 @@ class VersionManager:
     def get_version_list(self) -> list[dict]:
         """Get list of available Minecraft versions"""
         return minecraft_launcher_lib.utils.get_version_list()
+
+    def fetch_version_list(self, timeout: float = 10) -> list[dict]:
+        """带 timeout 拉取 Mojang 版本清单（mll 内部 requests.get 无超时，冷启动会挂死）"""
+        resp = requests.get(VERSION_MANIFEST_URL, timeout=timeout)
+        resp.raise_for_status()
+        versions = resp.json().get("versions")
+        if not isinstance(versions, list):
+            raise ValueError("版本清单缺少 versions 字段")
+        return versions
 
     def get_installed_versions(self) -> list[dict]:
         """Get list of installed Minecraft versions with details.
