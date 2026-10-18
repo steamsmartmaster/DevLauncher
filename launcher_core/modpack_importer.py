@@ -12,6 +12,8 @@ from typing import Optional, Callable
 import requests
 import minecraft_launcher_lib
 
+from .fast_install import fast_install
+
 logger = logging.getLogger("DevLauncher")
 
 
@@ -47,8 +49,37 @@ class ModrinthModRef:
     hashes: dict = field(default_factory=dict)
 
 
+LOADER_DEPENDENCY_KEYS = {
+    "forge": "forge",
+    "neoforge": "neoforge",
+    "fabric-loader": "fabric",
+    "quilt-loader": "quilt",
+}
+
+LOADER_DEPENDENCY_IDS = {v: k for k, v in LOADER_DEPENDENCY_KEYS.items()}
+
+
+def loader_from_dependencies(deps) -> tuple:
+    """按官方键名从 mrpack dependencies 解出 (loader, loader_version)。
+
+    官方只认 minecraft / forge / neoforge / fabric-loader / quilt-loader，且文档
+    明示后续可能新增键，所以未知键直接忽略。不能用子串匹配——`'forge' in
+    'neoforge'` 为真，会把 NeoForge 包判成 Forge。
+    """
+    if not isinstance(deps, dict):
+        return ("", "")
+    for key, ver in deps.items():
+        loader = LOADER_DEPENDENCY_KEYS.get(key)
+        if loader and isinstance(ver, str) and ver:
+            return (loader, ver)
+    return ("", "")
+
+
 class ModpackImporter:
     """Handles modpack import from various formats"""
+
+    OVERRIDE_DIRS = ("mods", "config", "resourcepacks", "shaderpacks", "defaultconfigs")
+    SKIP_SUFFIXES = (".part", ".tmp", ".crdownload", ".download", ".bak")
 
     def __init__(self, minecraft_dir, curseforge_api_key: str = "$2a$10$bL4bIL5pUWqfcO7KQtnMReakwtfHbNKh6v1uTpKlzhwoueEJQnPnm"):
         self.minecraft_dir = Path(minecraft_dir)
@@ -190,24 +221,9 @@ class ModpackImporter:
                 manifest = json.load(f)
         
         deps = manifest.get('dependencies', {})
-        
-        # Determine loader from dependencies
-        loader = ""
-        loader_version = ""
-        for key, ver in deps.items():
-            if 'forge' in key and key != 'minecraft':
-                loader = 'forge'
-                loader_version = ver
-            elif 'fabric' in key:
-                loader = 'fabric'
-                loader_version = ver
-            elif 'neoforge' in key:
-                loader = 'neoforge'
-                loader_version = ver
-            elif 'quilt' in key:
-                loader = 'quilt'
-                loader_version = ver
-        
+
+        loader, loader_version = loader_from_dependencies(deps)
+
         # Count mods
         files = manifest.get('files', [])
         mod_count = len([f for f in files if f.get('env', {}).get('client', 'required') != 'unsupported'])
@@ -306,6 +322,95 @@ class ModpackImporter:
         except Exception as e:
             logger.error(f"导入整合包失败: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
+
+    def export_mrpack(self, version_name: str, output_path: Optional[str] = None,
+                      mc_version: Optional[str] = None,
+                      loader: Optional[str] = None,
+                      loader_version: Optional[str] = None) -> dict:
+        """Export an installed instance as a .mrpack.
+
+        本地 jar 拿不到 Modrinth 下载链接，所以模组/配置一律走 overrides/ 而不是
+        files[]；本仓 _import_modrinth 会把 overrides/* 解到版本目录，因此导出物
+        可被本仓直接重新导入，也可被官方 Modrinth App 导入。
+        """
+        try:
+            from launcher_core.versions import VersionManager
+            vm = VersionManager(str(self.minecraft_dir))
+            version_dir = self.minecraft_dir / "versions" / version_name
+            if not version_dir.exists():
+                return {"success": False, "error": f"版本不存在: {version_name}"}
+
+            if mc_version is None:
+                mc_version = self._detect_mc_version(vm, version_name)
+            if loader is None or loader_version is None:
+                detected_loader, detected_version = self._detect_loader(vm, version_name)
+                loader = loader or detected_loader
+                loader_version = loader_version or detected_version
+
+            entries = self._collect_override_files(version_dir)
+            mod_count = sum(1 for arc, _ in entries if arc.startswith("overrides/mods/")
+                            and arc.endswith(".jar"))
+
+            dependencies = {"minecraft": mc_version or "1.20.1"}
+            dep_id = LOADER_DEPENDENCY_IDS.get(loader or "")
+            if dep_id and loader_version:
+                dependencies[dep_id] = loader_version
+
+            index = {
+                "formatVersion": 1,
+                "game": "minecraft",
+                "versionId": version_name,
+                "name": version_name,
+                "summary": f"Exported from DevLauncher ({version_name})",
+                "files": [],
+                "dependencies": dependencies,
+            }
+
+            out_path = Path(output_path) if output_path else (
+                self.minecraft_dir / f"{version_name}.mrpack")
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("modrinth.index.json",
+                            json.dumps(index, ensure_ascii=False, indent=2))
+                for arcname, src in entries:
+                    zf.write(src, arcname)
+
+            logger.info(f"导出 mrpack: {out_path} "
+                        f"({mod_count} 个模组, {len(entries)} 个 override 文件)")
+            return {
+                "success": True,
+                "path": str(out_path),
+                "mod_count": mod_count,
+                "override_count": len(entries),
+            }
+        except Exception as e:
+            logger.error(f"导出 mrpack 失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def _collect_override_files(self, version_dir: Path) -> list:
+        entries = []
+        for sub in self.OVERRIDE_DIRS:
+            src = version_dir / sub
+            if not src.is_dir():
+                continue
+            for f in sorted(src.rglob("*")):
+                if not f.is_file() or f.name.endswith(self.SKIP_SUFFIXES):
+                    continue
+                rel = f.relative_to(version_dir).as_posix()
+                entries.append(("overrides/" + rel, f))
+        return entries
+
+    @staticmethod
+    def _detect_mc_version(vm, version_name: str) -> str:
+        data = vm.get_version_json(version_name) or {}
+        return data.get("inheritsFrom") or data.get("id") or ""
+
+    @staticmethod
+    def _detect_loader(vm, version_name: str) -> tuple:
+        for item in vm.get_installed_loaders(version_name) or []:
+            if isinstance(item, dict) and item.get("type"):
+                return (item["type"], item.get("version") or "")
+        return ("", "")
 
     def _import_curseforge(self, zip_path: str, version_name: str, report) -> dict:
         """Import CurseForge modpack"""
@@ -494,20 +599,8 @@ class ModpackImporter:
             deps = manifest.get('dependencies', {})
             mc_version = deps.get('minecraft', '1.20.1')
             files = manifest.get('files', [])
-            
-            # Determine loader
-            loader = ""
-            loader_version = ""
-            for key, ver in deps.items():
-                if 'forge' in key and key != 'minecraft':
-                    loader = 'forge'
-                    loader_version = ver
-                elif 'fabric' in key:
-                    loader = 'fabric'
-                    loader_version = ver
-                elif 'neoforge' in key:
-                    loader = 'neoforge'
-                    loader_version = ver
+
+            loader, loader_version = loader_from_dependencies(deps)
             
             # Create version directory
             version_dir = self.minecraft_dir / "versions" / version_name
@@ -1006,7 +1099,7 @@ class ModpackImporter:
                     last_phase["msg"] = phase
                     report(92, 100, phase)
             
-            minecraft_launcher_lib.install.install_minecraft_version(
+            fast_install(
                 mc_version,
                 str(self.minecraft_dir),
                 callback={"setStatus": status_callback}

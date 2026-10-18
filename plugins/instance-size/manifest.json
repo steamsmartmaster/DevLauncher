@@ -1,0 +1,22 @@
+{
+  "id": "instance-size",
+  "name": "实例体积统计",
+  "version": "1.0.0",
+  "author": "DevLauncher",
+  "icon": "📦",
+  "description": "按实例统计 mods/config/saves 等目录占用，找出吃空间的大户",
+  "settings": [
+    {
+      "key": "show_global",
+      "label": "同时显示全局目录占用",
+      "type": "toggle",
+      "default": true
+    },
+    {
+      "key": "show_top",
+      "label": "最多显示的实例数",
+      "type": "number",
+      "default": 10
+    }
+  ]
+}

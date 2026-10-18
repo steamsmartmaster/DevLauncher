@@ -1,0 +1,22 @@
+{
+  "id": "mods-doctor",
+  "name": "模组目录体检",
+  "version": "1.0.0",
+  "author": "DevLauncher",
+  "icon": "🩺",
+  "description": "扫描 mods 目录：无效 jar、零字节文件、下载残留、大小写重名",
+  "settings": [
+    {
+      "key": "min_size_kb",
+      "label": "小于该体积的 jar 视为可疑 (KB)",
+      "type": "number",
+      "default": 1
+    },
+    {
+      "key": "skip_good",
+      "label": "只在发现问题时显示详情",
+      "type": "toggle",
+      "default": false
+    }
+  ]
+}

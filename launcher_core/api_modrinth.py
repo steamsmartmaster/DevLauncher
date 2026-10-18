@@ -5,6 +5,8 @@ import os
 import requests
 from typing import Optional
 
+from launcher_core import net
+
 logger = logging.getLogger("DevLauncher")
 
 BASE_URL = "https://api.modrinth.com/v2"
@@ -65,6 +67,117 @@ def build_facets(
     return facets
 
 
+# GET /projects?ids= 走 URL，超长会被 API 拒；单批上限取 100
+PROJECT_BATCH = 100
+
+
+def parse_dependencies(version: Optional[dict]) -> list:
+    """把 Modrinth 版本对象的 dependencies[] 归一化成可下载依赖清单。
+
+    实测字段（2026-10-13 api.modrinth.com）：project_id / version_id /
+    file_name / dependency_type ∈ required|optional|incompatible|embedded。
+
+    version_id 为 null 的语义是"未指定版本"，调用方要拿 project_id 回退挑版本，
+    所以这里保持 None 而不是空串——空串会让人误以为"已经指定了版本"。
+    """
+    if not isinstance(version, dict):
+        return []
+    raw = version.get("dependencies")
+    if not isinstance(raw, list):
+        return []
+    deps = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        project_id = item.get("project_id")
+        if not isinstance(project_id, str) or not project_id:
+            # 没有 project_id 无法定位项目，留着只会渲染出下载不了的空行
+            continue
+        version_id = item.get("version_id")
+        file_name = item.get("file_name")
+        deps.append({
+            "project_id": project_id,
+            "version_id": version_id if isinstance(version_id, str) and version_id else None,
+            "dependency_type": item.get("dependency_type") or "required",
+            "file_name": file_name if isinstance(file_name, str) and file_name else None,
+        })
+    return deps
+
+
+def attach_project_info(deps: list, projects: dict) -> list:
+    for dep in deps:
+        info = projects.get(dep.get("project_id")) or {}
+        dep["title"] = info.get("title") or dep.get("project_id", "")
+        dep["slug"] = info.get("slug", "")
+        dep["icon_url"] = info.get("icon_url", "")
+    return deps
+
+
+def _str_list(value) -> list:
+    if isinstance(value, (list, tuple)):
+        return [v for v in value if isinstance(v, str)]
+    if isinstance(value, str):
+        return [value]
+    return []
+
+
+def pick_dependency_version(versions: Optional[list], game_versions=None,
+                            loaders=None) -> Optional[dict]:
+    """从依赖项目的版本列表里挑一个与父版本兼容的版本。
+
+    先只认 release，全不匹配再退到 beta/alpha——依赖被装成 alpha 比直接装不上
+    更难排查（游戏起不来，日志里也看不出是依赖的问题）。
+    """
+    pool = [v for v in (versions or []) if isinstance(v, dict)]
+    want_gv = set(_str_list(game_versions))
+    want_ld = set(_str_list(loaders))
+    for prefer_release in (True, False):
+        for v in pool:
+            if prefer_release and v.get("version_type") not in (None, "release"):
+                continue
+            if want_gv and not (want_gv & set(_str_list(v.get("game_versions")))):
+                continue
+            if want_ld and not (want_ld & set(_str_list(v.get("loaders")))):
+                continue
+            return v
+    return None
+
+
+def parse_chosen_ids(raw) -> list:
+    try:
+        data = json.loads(raw) if raw else []
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [c for c in data if isinstance(c, str) and c]
+
+
+def build_download_plan(version: dict, chosen_ids: list, resolve=None) -> list:
+    """组装下载清单 [(url, filename), ...]：主文件 + 用户勾选的 optional 依赖。
+
+    resolve(dep, parent) 由调用方注入，负责把依赖解析成版本对象——放这里是为了
+    让清单组装逻辑能脱离 Qt/网络单测。
+    """
+    plan = []
+    for f in (version.get("files") or []):
+        if isinstance(f, dict) and f.get("url"):
+            plan.append((f["url"], f.get("filename") or "download.jar"))
+            break
+    wanted = set(chosen_ids or [])
+    if not wanted:
+        return plan
+    for dep in parse_dependencies(version):
+        if dep["dependency_type"] != "optional" or dep["project_id"] not in wanted:
+            continue
+        resolved = resolve(dep, version) if resolve else None
+        for f in ((resolved or {}).get("files") or []):
+            if isinstance(f, dict) and f.get("url"):
+                plan.append((f["url"], f.get("filename") or dep["project_id"] + ".jar"))
+                break
+    return plan
+
+
 class ModrinthAPI:
     """Modrinth API wrapper"""
 
@@ -109,6 +222,43 @@ class ModrinthAPI:
         except Exception as e:
             logger.error(f"获取 Modrinth 游戏版本失败: {e}")
             return []
+
+    def get_projects(self, ids: list) -> dict:
+        """批量查项目，返回 {project_id: {title, slug, icon_url, project_type}}。
+
+        依赖清单里只有 project_id（形如 P7dR8mSH），直接显示对用户毫无意义。
+        走一次批量请求拿标题，而不是每个依赖各发一次——实测
+        simple-voice-chat 一条版本就有 7 个 optional 依赖。
+        """
+        if not ids:
+            return {}
+        uniq = []
+        seen = set()
+        for pid in ids:
+            if isinstance(pid, str) and pid and pid not in seen:
+                seen.add(pid)
+                uniq.append(pid)
+        out = {}
+        for start in range(0, len(uniq), PROJECT_BATCH):
+            chunk = uniq[start:start + PROJECT_BATCH]
+            try:
+                resp = self.session.get(
+                    f"{BASE_URL}/projects",
+                    params={"ids": json.dumps(chunk)},
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                for p in resp.json():
+                    if isinstance(p, dict) and p.get("id"):
+                        out[p["id"]] = {
+                            "title": p.get("title") or p.get("slug") or p["id"],
+                            "slug": p.get("slug", ""),
+                            "icon_url": p.get("icon_url") or "",
+                            "project_type": p.get("project_type", ""),
+                        }
+            except Exception as e:
+                logger.error(f"Modrinth get_projects failed: {e}")
+        return out
 
     def get_mod_icon(self, mod_id: str) -> str:
         """Get mod icon URL by mod ID (slug or numeric)"""
@@ -224,61 +374,24 @@ class ModrinthAPI:
     def download_file(self, url: str, dest_path: str, callback=None) -> bool:
         """Download a file.
 
-        OVH/S3 预签名大文件实测会中途 IncompleteRead，单次失败不该判死，
-        所以按 Range 从断点续传重试；三次仍断则删掉半截文件避免被当成品。
+        断流续传、重试、原子落盘统一走 launcher_core.net（与整合包导入、
+        版本安装共用一套，代理与重试次数只需配置一次）。这里只保留本类对外
+        的进度契约：callback 收 0.0~1.0 的比例，而不是字节数。
         """
-        tmp_path = dest_path + ".part"
-        for attempt in range(1, DOWNLOAD_RETRIES + 1):
-            try:
-                self._download_attempt(url, tmp_path, callback, attempt > 1)
-                os.replace(tmp_path, dest_path)
-                logger.info(f"Downloaded: {dest_path}")
-                return True
-            except Exception as e:
-                logger.error(
-                    f"Download failed (attempt {attempt}/{DOWNLOAD_RETRIES}): {e}")
-        for p in (tmp_path, dest_path):
-            try:
-                if os.path.exists(p):
-                    os.remove(p)
-            except OSError:
-                pass
-        return False
+        def _progress(done: int, total: int) -> None:
+            if callback and total > 0:
+                callback(min(1.0, done / total))
 
-    def _download_attempt(self, url: str, tmp_path: str, callback,
-                           allow_resume: bool):
-        """One GET pass writing to tmp_path; raises on any failure."""
-        start = 0
-        headers = {}
-        mode = "wb"
-        if allow_resume and os.path.exists(tmp_path):
-            start = os.path.getsize(tmp_path)
-            if start:
-                headers["Range"] = f"bytes={start}-"
-                mode = "ab"
-
-        resp = self.session.get(url, stream=True, timeout=60, headers=headers)
-        if resp.status_code == 416:
-            # Range 起点已在文件末尾之外：清空重下
-            os.remove(tmp_path)
-            resp.close()
-            return self._download_attempt(url, tmp_path, callback, False)
-        resp.raise_for_status()
-        if start and resp.status_code != 206:
-            # 服务器忽略 Range 回了全量，必须从头写否则拼接出坏文件
-            start, mode = 0, "wb"
-
-        total = int(resp.headers.get("content-length", 0) or 0)
-        total_all = start + total
-        downloaded = start
-        with open(tmp_path, mode) as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                if not chunk:
-                    continue
-                f.write(chunk)
-                downloaded += len(chunk)
-                if callback and total_all > 0:
-                    callback(min(1.0, downloaded / total_all))
+        ok = net.download_file(
+            url, dest_path,
+            session=self.session,
+            callback=_progress if callback else None,
+            retries=DOWNLOAD_RETRIES,
+            timeout=60,
+        )
+        if ok:
+            logger.info(f"Downloaded: {dest_path}")
+        return ok
 
 
 # Singleton

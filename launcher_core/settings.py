@@ -25,7 +25,9 @@ class Settings:
         "theme_primary": "#ffffff",
         "theme_gradient_start": "#ffffff",
         "theme_gradient_end": "#888888",
-        "version_isolation": False
+        "version_isolation": False,
+        "download_proxy": "",
+        "download_workers": 16
     }
 
     def __init__(self):

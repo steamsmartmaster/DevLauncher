@@ -1,0 +1,22 @@
+{
+  "id": "java-doctor",
+  "name": "Java 运行时体检",
+  "version": "1.0.0",
+  "author": "DevLauncher",
+  "icon": "☕",
+  "description": "检查配置的 Java 能否运行所选版本：版本号解析与最低要求对比",
+  "settings": [
+    {
+      "key": "check_mc_version",
+      "label": "对照的 Minecraft 版本",
+      "type": "text",
+      "default": "1.20.4"
+    },
+    {
+      "key": "custom_java",
+      "label": "指定 Java 路径（留空用启动器设置）",
+      "type": "text",
+      "default": ""
+    }
+  ]
+}

@@ -9,6 +9,8 @@ from pathlib import Path
 import minecraft_launcher_lib
 import requests
 
+from .fast_install import fast_install
+
 logger = logging.getLogger("DevLauncher")
 
 VERSION_MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
@@ -183,7 +185,7 @@ class VersionManager:
         """Install a specific Minecraft version"""
         if callback is None:
             callback = {}
-        minecraft_launcher_lib.install.install_minecraft_version(
+        fast_install(
             version_id,
             self.minecraft_dir,
             callback=callback

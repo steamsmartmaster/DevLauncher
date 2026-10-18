@@ -10,6 +10,8 @@ from pathlib import Path
 
 import minecraft_launcher_lib
 
+from .fast_install import fast_install
+
 logger = logging.getLogger("DevLauncher")
 
 
@@ -96,7 +98,7 @@ class GameLauncher:
                 try:
                     def _install_cb(status):
                         logger.info(f"安装 {inherits_from}: {status}")
-                    minecraft_launcher_lib.install.install_minecraft_version(
+                    fast_install(
                         inherits_from, self.minecraft_dir,
                         callback={"setStatus": _install_cb}
                     )
