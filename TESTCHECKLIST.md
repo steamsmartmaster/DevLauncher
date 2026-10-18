@@ -292,3 +292,186 @@
 - [ ] 下载客户端 zip 时进度面板显示**百分比**（不再是纯条纹动画），且百分比随下载推进不回跳
 - [ ] 同一进程内下载模组 jar / 整合包 zip / 内容文件：进度百分比不受影响（其余四条路径回归）
 - [ ] 下载完成后进度面板正常收起，游戏状态回到 idle
+
+## 32. 页面切换卡顿：重列表离屏跳过布局（2026-10-11 新增）
+- [ ] 在下载页（版本子 tab，100+ 张卡片）与其它页面之间来回点击：切换无明显顿挫，不再感到点击后卡一下
+- [ ] 快速连点侧栏图标连续切换 10 次以上：过程顺畅，无累积变卡
+- [ ] 下载页卡片视觉不变：圆角/边框/hover 上浮/选中高亮/右下角加载器图标均正常
+- [ ] 下载页滚动到底再滚回顶：卡片间距与滚动条位置不跳动（contain-intrinsic-size 占位生效）
+- [ ] 切换「全部 / 正式版 / 快照版」与搜索过滤：网格仍正常重排，卡片数量正确
+- [ ] 已安装版本页（版本管理）点击卡片选中、hover 上浮效果不受影响
+- [ ] 控制台（F12）无 `content-visibility` 相关报错
+
+## §33 下载模组依赖与可选依赖（2026-10-13）
+
+- [ ] 搜索一个带 required 依赖的模组（Create / Jade / Architectury API），版本选择器每条版本下方应出现「依赖」行，显示**项目标题**（不是 `P7dR8mSH` 这类裸 project_id）
+- [ ] 搜索一个带 optional 依赖的模组（Simple Voice Chat / Jade），版本下方出现「可选依赖」行，复选框默认**不勾选**
+- [ ] 勾选一个可选依赖后确认，`mods/` 里同时出现主模组 jar 与依赖 jar
+- [ ] 不勾任何可选依赖时，`mods/` 里只有主模组 jar（不产生额外下载）
+- [ ] 点击依赖块内的复选框**不会**触发立即下载（只有点击版本条目本身才会）
+- [ ] 同一列表中不同版本的复选框互不串味（`data-version` 生效）
+- [ ] 若版本带 incompatible 依赖，该项**不应**出现在依赖块中
+- [ ] 依赖无匹配版本（`version_id` 为 null 且父版本的游戏版本/加载器对不上）时，主模组仍正常下载，日志有对应记录
+- [ ] 断网或 `get_projects` 失败时，依赖显示回退为 project_id，不出现空白行、不阻断主模组下载
+
+
+## §34 导出实例为 mrpack（2026-10-13）
+
+- [ ] 版本管理页已安装版本卡片出现「导出 mrpack」按钮（复制旁边），未安装版本**不显示**该按钮
+- [ ] 点击后立刻出现「正在导出 …」提示，导出期间 UI 不卡（拖动窗口、点其它页都应跟手）
+- [ ] 导出成功后弹出提示，含模组数、override 文件数、完整输出路径
+- [ ] 到 `.minecraft/` 下确认生成了 `<版本名>.mrpack`
+- [ ] 用 `python -c "import zipfile;zipfile.ZipFile(r'<path>.mrpack').namelist()"` 确认 zip 根下有 `modrinth.index.json`，且 `overrides/mods/` 里有模组 jar
+- [ ] 解开 `modrinth.index.json` 确认：`formatVersion` 为 1、`game` 为 `minecraft`、`versionId` 等于版本名、`files` 为**空数组**、`dependencies` 只含 `minecraft` 及一个 loader 键（`fabric-loader` / `forge` / `neoforge` / `quilt-loader` 之一）
+- [ ] Fabric 实例导出的 `dependencies` 是 `fabric-loader`，**不是** `fabric`；Forge 是 `forge`；NeoForge 是 `neoforge`；Quilt 是 `quilt-loader`
+- [ ] 导出的包用本仓「导入整合包」重新导入，实例能起来、模组齐、`mods/` 无重复 jar
+- [ ] 该 mrpack 丢给官方 Modrinth App 导入成功（验证 `overrides/` 路径符合规范）
+- [ ] 实例里有 `config/`、`resourcepacks/`、`shaderpacks/` 时一并进包，导出后重新导入内容一致
+- [ ] `mods/` 下有 `xxx.jar.part` 半成品时**不进包**（`SKIP_SUFFIXES` 生效）
+- [ ] 版本 json 无 `inheritsFrom`（独立版本）时 mc 版本取 `id`，不报错
+- [ ] 版本目录不存在时导出失败并给出中文错误提示，不崩溃、不留半截文件
+- [ ] 对一个含 200+ 模组的实例导出，耗时可接受且全程不卡 UI
+
+## 35 图形化游戏设置（options.txt）（2026-10-14）
+
+- [ ] 版本管理页有「游戏设置」卡片，点开进 `versionGameOptionsPage`，工具栏显示**实际** `options.txt` 路径
+- [ ] 版本隔离打开的实例，路径应指向该实例目录下的 `options.txt`，不是全局 `.minecraft`
+- [ ] 改动任一控件后「保存设置」，重启启动器再进该页，值应保持
+- [ ] `options.txt` 原有 `.bak` 备份；保存过程中直接杀进程，`options.txt` 不应变成半截文件
+- [ ] 手动在 `options.txt` 加一个启动器不认识的键（如 `zz_custom:42`），保存后该键**仍在**
+- [ ] 手动在 `options.txt` 写 `resourcePacks:["vanilla"]` 这类**值里带冒号**的行，读出来不被切碎
+- [ ] 关闭快照后 `showSnapshots` 应写成 `false`；把 `guiScale` 拖到极值，写出的数字在 min/max 内
+- [ ] label / hint 含 `<`、`>`、`&` 的极端文案（手改 `options.txt` 注入），页面不出现裸 HTML、不报错
+- [ ] 没动过的控件**不产生** `data-orig` 之外的改动；只改一项时提交的 JSON 只有那一个键
+- [ ] 游戏运行中点保存：应有提示且不静默失败（写入被占用文件时的报错可见）
+- [ ] 路径与文件名含空格、中文的实例，读写都正常
+
+## 36 工具插件 ×3（2026-10-14）
+
+- [ ] 把三个插件目录放进 `plugins/`，重新加载后列表出现 mods-doctor / instance-size / java-doctor 且默认启用
+- [ ] mods-doctor：在 `mods/` 里制造 `Sodium.jar` + `sodium.jar`（不同大小写），报告应识别为重复（NTFS 下二者无法真共存，用纯函数用例覆盖）
+- [ ] mods-doctor：放入 `.txt`、0 字节 `.jar`、`.jar.part`，分别落到 leftovers / empty / 非正常 jar 分类
+- [ ] instance-size：报出的全局总大小 ≈ 各实例之和；大目录不把 UI 卡死
+- [ ] instance-size：`human()` 对 0、1023、1024、1048576 的输出分别是 `0 B` / `1023 B` / `1.0 KB` / `1.0 MB` 量级
+- [ ] java-doctor：分别用 `java -version` 输出 `1.8.0_411` 与 `17.0.9` 两段样本文本，解析出的版本正确
+- [ ] java-doctor：1.16.5→Java 8、1.17.1→16、1.20.1→17、1.21→21 的推荐判定正确
+- [ ] java-doctor：装了低版本 Java 时给出「不满足」结论并指明需要的版本
+- [ ] 三个插件的详情面板都能渲染 `plugin-content`，控制台无 `errorMsg`
+- [ ] 卸载某个插件后列表不再出现，卸载失败有可见报错
+
+## 37 界面中英双语（i18n）（2026-10-14）
+
+- [ ] 首次启动在**英文系统**（`navigator.language` 为 `en-US` 等）下界面直接是英文；中文系统直接是中文
+- [ ] 手动切到 English：导航、按钮、表单 label、placeholder、title 提示全部变英文；切回简体中文完全还原
+- [ ] **切换后刷新页面**语言应保持（localStorage 持久化），且优先于系统语言
+- [ ] 英文模式下全站搜索不得残留中文（排除 F12 控制台日志）；重点翻几个动态页：版本列表、模组搜索、世界/资源包、游戏设置、插件详情、导入结果
+- [ ] JS 动态拼出来的提示（确认删除、导出进度、`N 个模组 →` 这类）在英文模式下不残留中文，且数字/路径/文件名等动态部分没被吃掉
+- [ ] JS 用 `innerHTML` 动态插入的卡片、空状态、加载态，切语言后立即生效，无需刷新
+- [ ] SCRIPT / STYLE 内容不被翻译，页面不因翻译而出现整段 HTML 文本或标签泄漏
+- [ ] 语言下拉的两个选项本身（简体中文 / English）在两种语言下都可读、可点
+- [ ] 英文模式下无横向溢出/文字截断（英文普遍比中文长），重点看设置页、插件卡、版本卡按钮
+- [ ] 改文案后跑 `python tools/i18n/collect.py && python tools/i18n/build.py`，两次产出字节一致；缺译时 build 报 `MISSING` 而不是静默产出空英文
+- [ ] 全量门禁：`python -m pytest tests -q`、`python <js_gates.py>`、node --check 内联脚本与 `ui/i18n*.js`、`py_compile` 全绿
+
+## 38 下载提速（2026-10-14）
+
+- [ ] 安装一个全新原版版本（如 1.21.4），进度条**只涨不跌**，不会在切相位时跳回 0
+- [ ] 进度条不会停留在 99% 不动（`finish()` 兜底生效）；跑完后弹出成功提示
+- [ ] 进度条不会一帧内连跳几十次导致界面卡顿（整数百分比去重生效，可在 F12 看信号频率）
+- [ ] 安装一个**从没下过**的版本，全程断点观察：client jar（约 30MB）与 JVM runtime（约 50–200MB）**同时**在下载，不是先下完 jar 再下运行时
+- [ ] 中途强制断网再恢复：下载应自动重试并续传（`.minecraft/versions/<v>/<v>.jar.part` 体积继续增长而非清零）
+- [ ] 下载完成后校验文件 sha1 与官方一致（`python -c` 对比 manifest 里的 hash）
+- [ ] 服务器返回 416（片段长度越界）时能删片段重来，不出现"永远下不完"的死循环
+- [ ] 安装**Forge / NeoForge**（带 `inheritsFrom`）：父版本与子版本都装上，进度条仍正常走单相位、不倒退
+- [ ] 本地已有版本 json 时安装**不产生**对 `launchermeta.mojang.com` 的请求（断网可验证）
+- [ ] 设置页填入可用代理（如 `http://127.0.0.1:7890`）后立刻安装：走代理下载；清空代理后恢复直连
+- [ ] 代理设置对 mll 自己的下载（Fabric/Forge 安装器内部拉取）同样生效——装一次 Fabric 验证
+- [ ] 并发数改成 1 / 8 / 64 后安装，均不报错；改成 0 或负数时被拦截
+- [ ] 改动下载设置后**重启启动器**，设置仍在且生效
+- [ ] 模组下载（Modrinth）在服务器 500/502/503/504 时自动重试；POST 类请求（如上传）**不被**自动重放
+- [ ] 网络彻底失败时：已下好的旧文件**不被删除**，只清理 `.part` 半成品
+- [ ] 进度回调跨重试累计（不是每轮从 0 重新报），UI 上不会看到进度倒退回起点
+
+
+## 39 皮肤与披风（2026-10-14）
+
+- [ ] 设置页出现「皮肤与披风」分组，含当前皮肤预览、variant 下拉、更换/刷新按钮、披风列表
+- [ ] 进设置页时自动拉取一次当前 profile，预览图显示**当前 ACTIVE 皮肤**
+- [ ] 没有 ACTIVE 皮肤时预览隐藏，不出现裂图/占位图标
+- [ ] 选一个 64x64 的合法皮肤 PNG 上传成功，预览更新为新皮肤
+- [ ] 选一个 **64x32** 的旧版皮肤 PNG 也能上传成功
+- [ ] 选一张 **32x32 / 128x128** 的图：本地即被拒绝，提示"必须是 64x64 或 64x32"，**不发出任何网络请求**
+- [ ] 选一张非 PNG（改扩展名的 jpg）：提示"不是有效的 PNG 图片"
+- [ ] 选 Slim 后上传，游戏内手臂变细；选 Classic 后上传，手臂变宽
+- [ ] 上传后 variant 下拉自动回填为上传时选的那个
+- [ ] 上传**超大 PNG**（如几百 MB）：要么服务端接受，要么透传服务端原始报错——**不出现本地先拒**的情况
+- [ ] 披风列表：没有披风时显示"暂无披风"，不显示空白区域
+- [ ] 有披风时：ACTIVE 那个按钮禁用且标「使用中」，其余可点
+- [ ] 点某个未激活的披风 → 装备成功，列表状态随之更新（无需手动刷新）
+- [ ] 点「隐藏披风」→ 所有披风回到可装备状态
+- [ ] 装备一个**不属于自己的** capeId（接口直调）：报错含 "does not own"，UI 明确显示失败原因
+- [ ] **离线账号**下：更换/刷新/装备/隐藏一律提示"离线账号无法更改"，控制台无 401 报错、无请求发出
+- [ ] 未登录任何账号时同样被拦截，不崩溃
+- [ ] 微软账号 token 过期时：报错透传到 UI（不静默失败），点「刷新」可重试
+- [ ] 英文模式下该分组文案为英文，且无横向溢出（英文较长）
+- [ ] 全量门禁：`python -m pytest tests -q`、`node --check` 内联脚本、`py_compile` 全绿
+
+## 40 打包冒烟与插件全量打包
+
+- [ ] `python -m pytest tests/test_smoke_and_imports.py -q` 8 passed
+- [ ] 全套门 `python -m pytest tests -q`（385 passed）+ `py_compile` + `node --check` 全绿
+- [ ] 跑 `powershell -ExecutionPolicy Bypass -File build_exe.ps1` 输出含 `boot ok (page=versionsLoaded)` 与 `BUILD OK`
+- [ ] **反向验证判据有效**：人为把 `main.py` 的 `configure_downloads(` 改回 `fast_install.configure(` 重建，冒烟必须报 `启动未完成，缺少标记`、整体 `BUILD FAILED`（验完改回）
+- [ ] `dist/DevLauncher.exe` 存在且修改时间在本次构建之后
+- [ ] `dist/DevLauncher-b1.2-win64.zip` 解压后含 `DevLauncher.exe` + `CHANGELOG.txt` + `plugins/` 下**全部 4 个**插件目录（hello-sample / instance-size / java-doctor / mods-doctor），每个目录内 `manifest.json` 与 `plugin.py` 齐全
+- [ ] `dist/logs/launcher.log` 新增量含 `MainWindow 初始化完成`，且**不含** `has no attribute`
+- [ ] 从 zip 解压目录双击 `DevLauncher.exe`：窗口正常出现、版本列表加载（919 左右）、登录态与设置沿用 `~/.mc-launcher`
+- [ ] 断网后启动仍能进主界面（冒烟的 `获取版本列表失败` 分支放行），日志写 `版本清单刷新失败，沿用缓存`
+- [ ] exe 旁新建 `plugins/` 放自定义插件可被扫描到（`app_base_dir()` 在 frozen 态取 exe 目录）
+- [ ] `build_exe.ps1` 无 BOM 且不含参与字符串比较的中文字面量（标记全定义在 Python 侧）
+- [ ] 英文模式下无冒烟相关中文（脚本输出仅 ASCII / 日志原文）
+
+## 41 账户页签整合皮肤与披风
+
+- [ ] 侧栏八个页签顺序为 已安装版本 / 下载 / 模组管理 / 世界管理 / 资源包管理 / 设置 / **账户** / 插件，账户页签紧贴在插件上方
+- [ ] 进入账户页：账户卡列表与「皮肤与披风」同屏可见，无重叠、无空白块
+- [ ] 设置页向下滚动到底：已无「皮肤与披风」分组；其余分组（游戏设置/游戏窗口/下载设置/界面设置/主题颜色/界面语言）均在
+- [ ] 每次进账户页都会重新拉 profile：断网后进页，状态位出错误而不是永久停在旧数据
+- [ ] 切换账号（silent）后不被踢出账户页，且账户卡、侧栏、页头头像同步
+- [ ] 在账户页上传皮肤/装备披风后，预览图与披风 ACTIVE 态自动刷新（无需手动再点刷新）
+- [ ] 离线账号：上传皮肤/装备披风仍在发请求**之前**被拦并给出明确提示
+- [ ] 账户页仍保留：Microsoft 登录、离线登录、账户卡点击切换、删除二次确认、退出登录
+- [ ] `node tests/test_account_skin_tab.js` 64 PASS / 0 FAIL（原 34，2026-10-17 §42 追加 9 条，2026-10-18 §43 追加 21 条）
+- [ ] 旧测试不回归：`node tests/test_account_ui.js`、`node tests/test_plugins_ui.js` 均 0 FAIL
+- [ ] 全量门禁：`python -m pytest tests -q`（385 passed）+ 17 个 node 测试（1040 断言）+ `py_compile` + `node --check` 全绿
+- [ ] 英文模式下账户页新增区域均为英文，无硬编码中文漏网
+- [ ] `python tools/i18n/collect.py` 与 `build.py` 重跑后 `strings.json` / `ui/i18n_dict.js` 无变化
+
+## 42 皮肤/披风标签置顶 + 令牌过期自动刷新
+
+- [ ] 账户页「皮肤与披风」分组中，`当前皮肤` / `披风` / `说明` 均为**暗灰小标题**，各自独占一行、位于对应卡片**上方**（不再出现一字一行的竖排）
+- [ ] 卡片内只剩控件（预览图 / variant 下拉 / 更换皮肤 / 刷新 / 状态位 / 披风列表 / 隐藏披风 / 说明文字），标签不再被塞进卡片
+- [ ] 让 `#skinsStatus` 显示长错误串（如 `皮肤/披风请求失败: HTTP 401: Unauthorized`）并缩窄窗口：状态串在卡片内换行，标签**不**被压成竖排
+- [ ] 其他设置项外观不变（设置页的「下载代理 / 下载并发数 / 语言」等仍是标签在左、值在右）
+- [ ] 微软 token 已过期（`exp` 早于当前时间）时点「刷新」：自动用 `refresh_token` 换新 `access_token` 后重试，皮肤/披风正常显示，日志出现 `正在刷新微软访问令牌（皮肤/披风）`
+- [ ] 服务端返回 401 时自动刷新并**只重试一次**；若刷新拿不到新 token，UI 显示 `登录已过期，请重新登录`
+- [ ] 非 401 失败（如 500 / 断网）不被当成过期处理，直接透传原始报错
+- [ ] `refresh_token` 缺失或刷新失败时**不崩溃**、异常不出工作线程，UI 收到 `{"ok": false, "error": ...}`
+- [ ] 离线账号：更换/刷新/装备/隐藏仍在发请求前被拦，提示"离线账号无法更改"，且不会触发刷新
+- [ ] `node tests/test_account_skin_tab.js` 64 PASS / 0 FAIL
+- [ ] `python -m pytest tests/test_tokens.py tests/test_skins.py -q` 全绿（tokens 12 + skins 新增 10）
+- [ ] 全量门禁：`python -m pytest tests -q`（385 passed）+ 17 个 node 测试（1040 断言）+ `py_compile`（62 文件）+ `node --check` 全绿
+- [ ] `python tools/i18n/collect.py` 与 `build.py` 重跑后 `strings.json` / `ui/i18n_dict.js` 无变化
+
+## 43 账户页披风预览 + 下拉框统一 + 微软四色 Logo
+
+- [ ] 账号有 ACTIVE 披风时，账户页披风卡片左侧显示披风预览图（64x32），内容即当前 ACTIVE 披风的纹理
+- [ ] 装备 / 隐藏披风后预览图自动更新（无需再手动点「刷新」）
+- [ ] 无披风时预览不显示，卡片内显示 `暂无披风`；披风存在但无纹理 URL 时预览同样隐藏
+- [ ] 「当前皮肤」右侧 variant 下拉框为深色主题、文字清晰可见，与相邻「更换皮肤 / 刷新」按钮同风格（不再白底白字）
+- [ ] variant 下拉宽度随内容自适应（`width:auto;min-width:160px;`），选项文字不被裁剪
+- [ ] 账户卡上方的 Microsoft 登录按钮图标为四色品牌 Logo
+- [ ] 登录态变化后（`microsoftBtn.innerHTML` 重写）图标仍为四色品牌 Logo，不残留单色描边版
+- [ ] `node tests/test_account_skin_tab.js` 64 PASS / 0 FAIL（2026-10-18 §43 追加 21 条）
+- [ ] 全量门禁：`python -m pytest tests -q`（385 passed）+ 17 个 node 测试（1040 断言）+ `py_compile`（62 文件）+ `node --check` 全绿
+- [ ] `python tools/i18n/collect.py` 与 `build.py` 重跑后 `strings.json` / `ui/i18n_dict.js` 无变化

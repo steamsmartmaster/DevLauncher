@@ -19,25 +19,29 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed `
     main.py
 if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed' }
 
-# 3) 组装发布 zip：exe + 示例插件 + 更新日志
+# 3) 组装发布 zip：exe + 全部插件（frozen 时从 exe 同目录取 plugins/）+ 更新日志
 $tag = 'b1.2'
 $zipName = "DevLauncher-$tag-win64.zip"
 $stage = Join-Path $env:TEMP "devlauncher-build-$tag"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-New-Item -ItemType Directory -Path "$stage\plugins\hello-sample" -Force | Out-Null
+New-Item -ItemType Directory -Path "$stage\plugins" -Force | Out-Null
 Copy-Item 'dist\DevLauncher.exe' "$stage\"
-Copy-Item 'plugins\hello-sample\manifest.json', 'plugins\hello-sample\plugin.py' "$stage\plugins\hello-sample\"
+foreach ($plug in (Get-ChildItem 'plugins' -Directory)) {
+    $dst = Join-Path "$stage\plugins" $plug.Name
+    New-Item -ItemType Directory -Path $dst -Force | Out-Null
+    Copy-Item (Join-Path $plug.FullName '*') $dst -Recurse -Force
+}
 Copy-Item 'CHANGELOG.txt' "$stage\"
 $zipPath = Join-Path 'dist' $zipName
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Compress-Archive -Path "$stage\*" -DestinationPath $zipPath
 
-# 4) 冒烟：30s 存活 + 日志有新写入（构建刚完成时可能与杀软扫描重叠导致早退 → 最多重试 3 次）
+# 4) 冒烟：30s 存活 + 日志增量含启动完成标记（只验存活会放过"异常对话框挂着"的假活）
 $exePath = (Resolve-Path 'dist\DevLauncher.exe').Path
 $logPath = 'dist\logs\launcher.log'
 $ok = $false
 for ($try = 1; $try -le 3 -and -not $ok; $try++) {
-    $before = if (Test-Path $logPath) { (Get-Item $logPath).LastWriteTime } else { [datetime]::MinValue }
+    $beforeLen = if (Test-Path $logPath) { (Get-Item $logPath).Length } else { 0 }
     $p = Start-Process -FilePath $exePath -PassThru
     Start-Sleep -Seconds 30
     $alive = $false
@@ -46,12 +50,13 @@ for ($try = 1; $try -le 3 -and -not $ok; $try++) {
         $alive = -not $p.HasExited
         $code = if ($p.HasExited) { $p.ExitCode } else { '-' }
     } else { $code = 'spawn-failed' }
-    $logged = (Test-Path $logPath) -and ((Get-Item $logPath).LastWriteTime -gt $before)
-    if ($alive -and $logged) {
+    python tools\smoke_check.py $logPath $beforeLen
+    $booted = ($LASTEXITCODE -eq 0)
+    if ($alive -and $booted) {
         $ok = $true
         Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
     } else {
-        Write-Output "smoke try${try} failed (alive=$alive exit=$code logged=$logged), retrying..."
+        Write-Output "smoke try${try} failed (alive=$alive exit=$code booted=$booted), retrying..."
         if ($alive) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
         Start-Sleep -Seconds 5
     }

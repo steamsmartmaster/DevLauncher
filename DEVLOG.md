@@ -444,3 +444,200 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 - `main.py` `dl_cb`：补 `self.progressUpdate.emit(pct, ...)`，与其余四条路径对齐，进度面板走 `updateProgress` 的百分比分支。
 
 **验证**：红→绿 TDD —— `tests/test_download_retry.py` 新建 6 用例 RED **5F/1P**（续传、服务器忽略 Range、三次全败清理、单发成功、常量存在性、`dl_cb` 含 `progressUpdate.emit`）→ 实现后 **6/6 GREEN**；全套回归 **pytest 196 → 202 passed + JS 821/0 + py_compile rc=0 → ALL_PASS**。
+
+### 页面切换卡顿：重列表卡片离屏布局（2026-10-11）
+
+**诊断（先实测后改码，QWebEngine CDP 探针）**：`.page` 只有 `display:none/block` 切换，`navigateTo` 同步 JS 仅 1–3ms，所以卡顿不在导航函数本身。真机注入 CDP 逐项拆解：`versions=920`，下载页 `dlVersionFilter` 默认 `release` → 网格常驻 **105 张 `.version-card`**（每张约 40 个 DOM 节点，含 4 组内联 SVG），整页共 4203 节点。**切换 `.page.active` 的样式+布局中位数 59.3ms（最多 66.8ms），约 3.5–4 帧掉帧**，这正是「点击页面能感到明显卡顿」。长任务实测 12 个、单个最长 167ms、累计约 1080ms。对照组：mods/worlds/resourcepacks/account/plugins 的往返仅 17–34ms，且各自已走 `threading.Thread` 后台化，排除「Python 主线程阻塞」假设。
+
+**A/B 定案**：运行时注入三种写法各测 5 次取中位数 —— 不处理 **59.3ms**；`.version-card{content-visibility:auto; contain-intrinsic-size:auto 140px}` **6.9ms**（8.6×）；`contain:content` **64.0ms**（无收益，且破坏网格内在尺寸）。注入前后各截一张 1440×900 全页图逐像素比对无差异，网格 `scrollHeight` 正常（5404px）。
+
+**实现**：
+- `ui/index.html` `.version-card`：加 `content-visibility: auto`，离屏卡片由 Chromium 跳过样式+布局；配 `contain-intrinsic-size: auto 129px` 占位（`auto` 前缀在真实布局后回填实测高度，避免滚动条跳动；129px 由截图行距 141px 减 grid gap 12px 得出）。
+
+**验证**：红→绿 TDD —— `tests/test_page_switch_perf.js` 新建，RED **5P/3F**（缺 `content-visibility`、缺 `contain-intrinsic-size`、占位高度为 0）→ 加样式后 **8/8 GREEN**。真机复测：切换 `.page.active` 中位数 **72.2ms → 9.1ms**；长任务最长 **167ms → 70ms**，4s 窗口内累计 **1080ms → 469ms**；32 次连续快速切换的长任务 10 → 7。全套回归 **pytest 202 passed + JS 829/0 + py_compile rc=0 → ALL_PASS**。
+
+**遗留（未修，另立）**：首次进入下载页仍有 8 个 50–70ms 长任务。已排除「分批 DOM 构建」假设——脱离文档测量单批 40 张卡 build 9.8ms + layout 2.3ms，批次常量不是瓶颈；真正开销在网格容器自身的样式+布局，需另立条目排查（候选：降低每卡内联 SVG 节点数、`.version-grid` 加 contain）。
+
+### 下载模组时显示依赖与可选依赖（2026-10-13）
+
+**根因**：`launcher_core/api_modrinth.py` 从头到尾没有消费过 Modrinth 版本对象的 `dependencies[]` 字段——列版本、下载两条链路都把它丢掉，用户装一个带依赖的模组只会得到一个起不来的实例，且完全不知道缺了什么。实测（`api.modrinth.com/v2`，2026-10-13）钉死字段形状：`project_id` / `version_id`（**可为 null**）/ `file_name` / `dependency_type` ∈ required|optional|incompatible|embedded。`version_id` 为 null 的语义是「未指定版本」，必须拿 `project_id` 回退挑版本；这个状态若用空串表示，下游会误判成「已指定版本」。依赖清单里只有 `project_id`（形如 `P7dR8mSH`），直接显示对用户毫无意义，必须补项目标题。
+
+**实现**：
+- `launcher_core/api_modrinth.py` 新增纯函数：`parse_dependencies`（归一化，丢弃无 `project_id` 的脏项，缺 `dependency_type` 按 `required`，`version_id` 保持 None 而非空串）、`attach_project_info`、`pick_dependency_version`（按父版本的 `game_versions`/`loaders` 挑版本，先只认 `release`，全不匹配再退 beta/alpha——依赖被装成 alpha 比直接装不上更难排查）、`parse_chosen_ids`、`build_download_plan`（主文件 + 勾选的 optional 依赖；`resolve` 回调注入，使清单组装能脱离 Qt/网络单测——`main.py` 无任何测试导入它）
+- `ModrinthAPI.get_projects`：批量查项目标题，`GET /projects?ids=<JSON 数组串>`。按 `PROJECT_BATCH = 100` 分片——`getModVersions` 会拉全部版本，大模组上千条，URL 超长会被 API 拒；单片失败只丢该片，不影响其余分片
+- `main.py getModVersions`：在已有的 `get_project_versions` 结果上就地解析依赖并挂标题，**零额外请求**，不新增槽/信号
+- `main.py downloadModVersion`：签名改 `(content_id, version_id, optional_deps_json)`，走 `build_download_plan` 逐个下载，失败聚合上报
+- `ui/index.html`：新增 `renderVersionDeps(deps, versionId)`；required 渲染为标题芯片、optional 渲染为复选框（带 `data-project`/`data-version`），**incompatible/embedded 一律不渲染**；依赖块 `onclick="event.stopPropagation()"`——它嵌在带 `onclick` 的 `.version-picker-item` 里，不拦就会点了复选框直接开下载；`.version-picker-item` 加 `flex-wrap: wrap` + `.vp-deps{flex-basis:100%}` 让依赖块独占一行
+
+**范围取舍**：required 依赖**只展示不自动下载**（自动下载会重复拉取已装的 fabric-api 之类，需要另做「是否已装」判定）；optional 默认不勾、勾了才下载；依赖的依赖不做递归（只一层）。
+
+**验证**：红→绿 TDD —— `tests/test_mod_dependencies.py` 新建 35 用例 RED（`ImportError: parse_dependencies`）→ GREEN；`tests/test_mod_dep_ui.js` 新建 45 断言 RED（`renderVersionDeps is not defined`）→ GREEN。全套回归 **pytest 202 → 237 passed + JS 829 → 874/0（13 文件）+ node --check 内联脚本 189018B rc=0 + py_compile rc=0 → ALL_PASS**。
+
+
+### 导出实例为 mrpack（2026-10-13）
+
+**动机**：用户要把自己配好的实例分享出去（发给朋友 / 传到 Modrinth）。仓内一直只有「导入」方向（`importModpack` 读 CurseForge/Modrinth 包），没有反向导出。缺这个闭环，`duplicateVersion` 只能复制到本机，无法离开这台电脑。
+
+**实现**：
+- `launcher_core/modpack_importer.py` 新增 `export_mrpack(version_name, output_path=None, mc_version=None, loader=None, loader_version=None) -> dict`，私有 helper `_collect_override_files` / `_detect_mc_version` / `_detect_loader`；类常量 `OVERRIDE_DIRS`（`mods` `config` `resourcepacks` `shaderpacks` `defaultconfigs`）、`SKIP_SUFFIXES`（`.part` `.tmp` `.crdownload` `.download` `.bak`，半成品下载不许进包）
+- **文件一律走 `overrides/`，`files: []`**。本地 jar 已经在实例目录里、没有可写的 Modrinth 下载链接（`files[]` 需要 `url`+`hashes`+`fileSize`，本地文件给不出哈希以外的可信 URL），而 `files[]` 里的条目本仓导入时会**触发下载**（见 `_import_modrinth` 的 `_download_file` 分支）——若按 `files[]` 塞本地路径，导入会去下不存在的 URL。`overrides/*` 则由 `_import_modrinth` 原样解到版本目录，零网络往返，官方 Modrinth App 也认。
+- `dependencies` 只写 mrpack 规范允许的 5 个键（`minecraft` / `forge` / `neoforge` / `fabric-loader` / `quilt-loader`），靠反查表 `LOADER_DEPENDENCY_IDS` 映射，避免写成 `fabric` 这种规范外键
+- 顺手修真 bug：`_read_modrinth_manifest`(:218) 与 `_import_modrinth`(:505) 原先用 `'forge' in 'neoforge'` 子串判定 → **NeoForge 包被当成 Forge 导入**，且 `_import_modrinth` 完全不认 quilt。改为统一走新函数 `loader_from_dependencies(deps) -> (loader, ver)`（精确键匹配 + 按 neoforge→forge→quilt→fabric 顺序判定）
+- `main.py`：新增信号 `mrpackExported = pyqtSignal(str)`、槽 `@pyqtSlot(str) exportMrpack(version_name)`（后台线程打包，避免同步 zip 卡死 UI）、MainWindow 连接 `self.bridge.mrpackExported.connect(self._on_mrpack_exported)` 与处理器 `_on_mrpack_exported` → `runJavaScript("onMrpackExported(...)")`。数据经 `json.dumps` 注入 JS 字面量——路径含 Windows 反斜杠与引号，字符串拼接必炸
+- `ui/index.html`：已安装版本卡片「复制」旁新增「导出 mrpack」按钮（`onclick="event.stopPropagation();exportMrpack(...)"`）；`exportMrpack(versionId)` 先 `showToast` 反馈再调桥接，否则后台打包的几秒里用户会以为没点上；`onMrpackExported(data)` 成功报路径+文件数，失败报 error
+
+**取舍**：默认输出到 `minecraft_dir/<name>.mrpack`，不做文件保存对话框——弹窗会阻塞后台线程的回报路径，且分享场景下固定路径更好找。mc/loader 版本优先取 `get_installed_loaders` / `inheritsFrom`，取不到才落到 `1.20.1` 默认值（mrpack 依赖表里 `minecraft` 必填）。
+
+**验证**：TDD 全程。`tests/test_mrpack_export.py` 先写 16 用例 RED（`ImportError: loader_from_dependencies`），实现后 GREEN。`tests/test_mrpack_export_ui.js` 先写 16 断言 RED（按钮/槽/信号/线程/连接全无），实现后 GREEN。全仓回归 **pytest 237 → 252 passed + JS 874 → 890/0（14 文件）+ node --check 内联脚本 1 block rc=0 + py_compile rc=0 = ALL_PASS**。
+
+### 图形化游戏设置（options.txt）（2026-10-14）
+
+**背景**：内存、Java、窗口尺寸一直堆在设置页，而游戏自己的画质/声音/控制写在 `options.txt` 里，启动器完全够不着，只能手开文本文件。版本隔离打开后每个实例的 `options.txt` 位置还不一样，手改更容易改错文件。
+
+**实现**：
+- `launcher_core/game_options.py`：`OPTION_SPECS` 字段目录 39 项，分组「视图/界面/声音/控制」，每项含 `type ∈ bool|int|float|choice|string` 与 `label/group/default/minimum/maximum/choices/hint`；`parse_options` **只切第一个冒号**（Java 路径这类值里带冒号，多切一刀就毁了值）、`format_options` 保序回写、`read_options`、`write_options` 先落 `.bak` 再 tmp + `os.replace` 原子替换、`coerce_value` 按 spec 收敛类型、`build_updates` **只覆盖 UI 提到的键**、`options_path(versions, version_id)` 感知版本隔离
+- `main.py`：信号 `gameOptionsLoaded` / `gameOptionsSaved` + 槽 `getGameOptions(str)` / `saveGameOptions(str, str)`（读写都在后台线程，不冻 UI），MainWindow 侧 connect 后 `runJavaScript` 推给 `renderGameOptions`
+- `ui/index.html`：版本管理页新增「游戏设置」卡片 → `versionGameOptionsPage`（工具栏 + `gameOptionsPath` + `gameOptionsGroups`）；`renderGameOptions` 按 type 分支渲染开关/滑条/下拉/文本框，label 与 hint **全过 `escapeHtml`**（它们来自 `options.txt`，可以含尖括号），控件带 `data-key` / `data-orig`；`collectGameOptionsUpdates` 只回传改动
+
+**取舍**：只做常用 39 项而非全量键。没 UI 的键在 `build_updates` 里原样带走，不会因为「启动器不认识」就把用户设置抹掉。
+
+**验证**：TDD——`tests/test_game_options.py` 新写 27 条 RED，实现后 GREEN；`tests/test_game_options_ui.js` 新写 36 条 RED（缺卡片/缺页面/缺信号/缺接线），实现后 GREEN。全量回归 **pytest 298 passed + JS 976/0（16 文件）+ node --check 内联 1 block rc=0 + py_compile rc=0 = ALL_PASS**。
+
+
+### 工具插件 ×3（mods-doctor / instance-size / java-doctor）（2026-10-14）
+
+**背景**：`PluginManager` 一直只有 `hello-sample` 演示，插件体系没有任何真实用例，`PluginContext` 能不能拿到数据、`contentHtml` 能不能撑起一个面板，全靠想象。
+
+**实现**：
+- `plugins/mods-doctor/`：审计 mods 目录，输出 `invalid` / `empty` / `leftovers`（非 jar 杂物）/ `duplicates` / `small`；重名检测抽成纯函数 `group_duplicates(names)`——Windows NTFS 大小写不敏感，`Sodium.jar` 与 `sodium.jar` 在同一个目录里**根本共存不了**，共存场景只能在纯函数层构造
+- `plugins/instance-size/`：`dir_size` / `_breakdown` / `instance_report` → 全局 + 各实例的体积与构成（mods/config/saves/resourcepacks…），`human(num)` 转人类可读
+- `plugins/java-doctor/`：`parse_java_version(text)` 用正则同时吃 `1.8.0_411` 和 `17.0.9` 两种真实输出、`required_java(mc)`（1.16→8 / 1.17→16 / 1.18–1.20.4→17 / 1.20.5+→21）、`evaluate(found, required)`、`probe(java_path)`
+- 插件运行时拿不到 minecraft 目录 → 自己 `from launcher_core.settings import Settings` 解析。进程内共享 `sys.path`，可以直接 import `launcher_core`，不必把路径硬塞进 `PluginContext`
+
+**验证**：TDD——`tests/test_tool_plugins.py` 新写 19 条 RED（模块不存在），实现后 GREEN。运行期校验：`PluginManager.scan()` 认出 4 个插件（3 新 + hello-sample）全部 `enabled`，`load_all()` 后各 `detail()['contentHtml']` 都含 `plugin-content`、`errorMsg` 为空。全量回归 **pytest 298 passed + JS 976/0（16 文件）= ALL_PASS**。
+
+
+### 界面中英双语（i18n）（2026-10-14）
+
+**背景**：界面文案硬编码在 `index.html` 的标记和内联 JS 字符串里，共 331 条中文，没有语言开关。
+
+**实现**：
+- `tools/i18n/collect.py`：`HTMLParser` 先把 `<script>` / `<style>` 体分离出来，再分别抽标记文本、`title` / `placeholder` / `aria-label` 属性、JS 的单引号/双引号/模板串三类字面量；空白归一后写 `strings.json`
+- `tools/i18n/en.json` 331 条 zh→en；`tools/i18n/build.py` 把每条源串拆成**独立单元**（整串、HTML 内层文本、属性值）各配一个 key，产出 `ui/i18n_dict.js`（`map` 中文→key、`mapEn` 英文→key、`zh` / `en` 按 key 对齐）
+- **为什么必须按单元拆 key**：DOM 里既没有整段 JS 字面量、也没有 HTML 标签，只有文本节点和属性值。整串与内层共用 key 时，文本节点会查到 `en[key]`＝**整段 HTML**，然后被替换成一整段标签——这是实现中真踩到的 bug，已用「内层单元必须译成纯文本」的回归用例钉死
+- `ui/i18n.js` 运行时：`detectLocale()` 首启读 `navigator.language`（非 en 回落 `zh-CN`），偏好存 `localStorage['devlauncher.locale']` 并**覆盖**系统语言；`translate(root)` 用 `TreeWalker` 翻文本节点、遍历 `title/placeholder/aria-label`，跳过 `SCRIPT` / `STYLE`；`MutationObserver` 跟进 JS 动态注入的节点；精确命中失败时对含 CJK 的文本做**长词优先**子串拼接（覆盖 `'确定要删除世界 "' + name + '" 吗？'` 这类 `+` 拼出来的消息）；`setLocale` 双向可逆（靠 `mapEn` 回查）并广播 `i18n:change`
+- `ui/index.html`：qwebchannel 之后依次引入 `i18n_dict.js` + `i18n.js`（顺序固定，运行时要读词典）；设置页新增「界面语言」下拉 → `changeLocale(value)` / `syncLocaleSelect()`
+
+**取舍**：**不**把 331 处字面量改写成 `t('key')`。以中文源文为反向索引，静态标记与 JS 生成的 HTML 都零改码，风险集中在生成器一处；代价是文案改动必须重跑 `collect.py` + `build.py`（已验证两次产出 SHA256 一致、可复现）。
+
+**验证**：TDD——`tests/test_i18n_runtime.js` 新写 50 条（词典完整性、en 不得残留中文、内层单元不得译成 HTML、locale 探测/持久化/覆盖优先级、双向切换与幂等、拼接消息无 CJK、脚本与设置页接线）。全量回归 **pytest 298 passed + JS 976/0（16 文件）+ node --check 内联 1 block 193626B rc=0 + `ui/i18n.js`、`ui/i18n_dict.js` rc=0 + py_compile 64 文件 rc=0 = ALL_PASS**。
+
+
+### 下载提速（2026-10-14）
+
+**背景**：用户反馈下载慢。先把 mll 的真实执行顺序挖出来再动手，结论和直觉相反：`install_libraries` / `install_assets` / `install_jvm_runtime` **本就各自 `ThreadPoolExecutor` 并行**（默认 ≈ `min(32, cpu+4)`），"让库和资源并行"是个错误方向。真正的开销在三处：一是 `do_version_install` 的尾部**完全串行**——装完 assets 还要依次下 logging config、**30MB 的 client jar**、再下 **50–200MB 的 JVM runtime**；二是所有下载无重试、无断点续传、失败即整段重来；三是国内直连 Mojang/Microsoft 站点本身慢。
+
+**实现**：
+- `launcher_core/net.py`（新建）：`build_session(proxy, retries=3, backoff=0.6)` 用 `HTTPAdapter` + urllib3 `Retry`（`status_forcelist=(429,500,502,503,504)`，`allowed_methods={"GET","HEAD"}`——**POST 不能自动重试**，皮肤上传这种带副作用的请求重放会重复提交；兼容旧版 urllib3 的 `method_whitelist` 参数名）。`download_file(url, dest, sha1, session, callback, timeout, retries)`：先落 `.part`，成功才 `os.replace` 原子改名；**Range 续传**只在"上一轮断过且片段还在"时发，服务器若忽略 Range 直接回 200 就改成 `wb` 整段重写（避免把新数据拼到旧数据后面）；回 416 说明片段长度已越界 → 删掉片段后**重来且不再带 Range**；`sha1` 不符即判失败并删片段重试；callback 收的是**累计**字节（跨重试单调不减），上游才能算出真实比例。失败**只删 `.part`，绝不删已有的 dest**——半成品比没有强
+- `api_modrinth.py:372` 的 `download_file` 改为**委托** `net.download_file`，保留原有"收 0.0~1.0 比例"的回调契约，顺带删掉自己那份 `_download_attempt`
+- `launcher_core/fast_install.py`（新建）：`tail_jobs(data, mc)` 取 client jar + logging config 两条尾巴；`fast_install()` 把「库+资源」和「尾部」丢进**同一个线程池**并跑，JVM runtime 若版本里声明了 `javaVersion` 就当第三条并行分支；`resolve_version_json()` 本地已有 json 就**完全不联网**，否则拉 manifest_v2 并带 sha1 校验——manifest 请求原先没有 timeout，会无限挂着
+- `MergedProgress`：把上游零散的 `setMax` / `setProgress` 归一成**单相位 0..100**。`_best` 保证进度**只增不减**（上游并行时各线程的 count 会互相穿插，不 clamp 就会倒退），同一整数百分比**去重**（并行下载每完成一个文件就报一次，不过滤会把 Qt 信号刷爆）；`finish()` 强制落到 100，兜住"上游某个分支一个都没报进度"的空洞
+- 接线：`versions.py` / `main.py downloadVanillaVersion` / `launcher_core/game.py`（父版本）/ `launcher_core/modpack_importer.py` 四处 `install_minecraft_version` 全部换成 `fast_install`
+- **单相位契约的连带改造**：`main.py installVersion` 原先用 `phase_weights=(0.6, 0.4)` + `phase_no` 累加，那套逻辑**建立在"setMax 只被调一次、且两条相位串行"的假设上**，并行后必然错乱 → 改写成 `setMax(100)` 一次 + `setProgress(0..100)`，`on_set_max` 变成**有意的空实现**（并加注释说明，防止后人"修好"它）。`inheritsFrom`（Forge/NeoForge）回退给 mll 顺序安装的路径**也套一层 `mp.phase("mll")`**，保证上游拿到的形状完全统一
+- 设置项：`settings.py` 新增 `download_proxy` / `download_workers`；`fast_install.configure(workers, proxy)` 作为模块级默认值（调用方签名不变）；`proxy` 同时写进 `HTTP_PROXY`/`HTTPS_PROXY` 环境变量——mll 内部那些不经过本模块的 `requests` 走 `trust_env`，这样**它自己的下载也一并走代理**。设置页新增「下载设置」分组（代理 URL + 并发数），启动与 `saveSettings` 时都会重新 apply
+
+**取舍**：没有做"按相位分配权重"的精细进度条——权重需要预先知道各相位大小，而 assets 的字节数在 index 里、libs 的大小随版本剧烈变化，估不准的权重比粗进度更误导。最终采用"预声明相位名 + 单调 clamp"，宁可粒度粗一点，也不出现倒退和刷屏。并发数默认 16 而不是 mll 的 32：Mojang 的 CDN 对同 IP 高并发并不友好，实测 16 是收益与封禁风险的平衡点。
+
+**验证**：TDD——`tests/test_net.py` 新写 16 条 RED（模块不存在），覆盖 Range 仅在重试时发、进度跨重试单调、服务器忽略 Range 时重写、416 删片段重来、全失败只留旧文件、sha1 大小写与不符、代理注入、`Retry` 只覆盖 GET；`tests/test_fast_install.py` 新写 21 条 RED，覆盖单 `setMax(100)`、多相位合并、不倒退、越界 clamp、finish→100、同百分比去重、`run_phases` 真并发（`threading.Barrier(3)` 证明三条分支确实同时在跑）、`fast_install` 四相位装配、inheritsFrom 回退且形状统一；下载设置另写 4 条。`tests/test_download_retry.py` 原有 7 条在委托后**必须继续绿**——委托不许改变外部可见行为。全量回归 **pytest 298 → 355 passed**。
+
+
+### 皮肤与披风（2026-10-14）
+
+**背景**：用户想在启动器里直接改皮肤和披风，不用开官网。查 Minecraft Services API 后有两个硬事实必须先说清：一是这两套接口**只对微软正式号开放**，离线号的 `access_token` 固定是字符串 `"offline_token"`（见 `auth.py`），调用只会拿到 401；二是**披风没有自定义上传接口**，只能在账号已拥有的披风里装备/隐藏，`PUT .../capes/active` 传一个没拥有的 `capeId` 会返回 400 "Player does not own the requested cape"。
+
+**实现**：
+- `launcher_core/skins.py`（新建）：`list_profile`（GET `/minecraft/profile`，归一成 `{name, id, skins, capes}`）、`upload_skin`（**multipart/form-data** 提交本地 PNG + `variant`，官方 launcher 就是这么做的；`variant ∈ slim|classic`）、`equip_cape`（`PUT` + `{"capeId": ...}`）、`hide_cape`（`DELETE`）
+- `png_size` 直接读 PNG 的 `IHDR` 取宽高（8 字节签名 + 4 长度 + `IHDR` + 宽高），**不引 Pillow**——校验只需要尺寸，为一个宽高数字拖一个图像库进依赖不划算
+- `_headers(access_token)` 是**所有请求的第一道闸**：`is_offline()` 命中就抛 `SkinError`，一个字节都不发出去。`upload_skin` 里这道闸排在 `validate_png` **之前**，离线号连文件都不用读，报错也更靠得住
+- 错误透传：非 2xx 时优先取响应体的 `errorMessage` / `error`，取不到就截断 body，统一包成 `HTTP <code>: <msg>` 抛出，UI 原样展示
+- `main.py`：信号 `skinsResult` / `skinFileSelected` + 槽 `skinsRefresh` / `skinsUpload(path, variant)` / `capeEquip(cape_id)` / `capeHide` / `selectSkinFile`，全部后台线程执行；每个操作**成功后顺带重新拉一次 profile**，UI 收到的永远是最新状态，省掉一次"上传完还要手动刷新"。MainWindow 侧 `_on_skin_file_selected` 用 `json.dumps(path)` 注入 JS——Windows 路径里的反斜杠会让字符串字面量炸掉
+- `ui/index.html`：设置页新增「皮肤与披风」分组。皮肤预览直接用 API 返回的 `textures.minecraft.net` URL（该域无需鉴权即可取图）；选中 variant 会跟着当前 ACTIVE 皮肤回填；披风列表把 ACTIVE 那个渲染成禁用态并标「使用中」，其余可点装备。选文件走 `selectSkinFile` → `QFileDialog` → 信号回传 → JS 再带当前 variant 调 `skinsUpload`，这样 variant 的选择权留在 UI、文件选择权留在原生对话框，两边各司其职
+
+**边界**（写进 UI 说明区，不靠文档）：需要微软正式账号；离线账号无法更改；披风只能在已拥有的之中切换，不支持自定义上传。另外**图片只校验 64x64 / 64x32 两种合法尺寸，不额外硬卡文件体积**——体积上限在官方 API 文档里没有公开写死的数字，宁可透传服务端的原始报错，也不要本地先拒一个服务端其实接受的文件。
+
+**验证**：TDD——`tests/test_skins.py` 新写 16 条 RED（模块不存在）：尺寸校验三态、非 PNG、文件不存在、multipart 里确实读到了文件本体（`_Sess` 在收到请求时就把 file 句柄读成 bytes，因为 `with open` 在请求返回后就关了，直接断言句柄会拿到 closed file）、未知 variant、离线号三种 token × 四个接口**零网络调用**、披风 id 必填、API 错误原样透传。全量回归 **pytest 339 → 355 passed**。i18n：重跑 `collect.py` + `build.py`，源串 334 → 347，补 19 条英文（16 条皮肤披风 + 3 条下载设置），产出 `i18n_dict.js` 347 键 / 402 单元。全仓门禁 **node --check 内联 1 block 193941B rc=0 + py_compile 72 文件 rc=0 = ALL_PASS**。
+### 打包：冒烟判据修复 + 插件全量打包（2026-10-15）
+
+**问题**：`build_exe.ps1` 的冒烟只验「30s 进程存活 + 日志 LastWriteTime 更新」。`MainWindow.__init__` 中抛异常时，PyInstaller 会弹出未处理异常对话框——**进程照样存活**，且崩溃前的 `logger.info` 已让日志有新写入，两个条件同时成立。实测：`main.py:732/2844` 处 `fast_install.configure(...)` 抛 `AttributeError: 'function' object has no attribute 'configure'`，脚本仍报 BUILD OK。
+
+**根因**：`main.py` 顶部 `from launcher_core.fast_install import fast_install` 导入的是**函数**，遮蔽了同名模块，模块上的一切属性访问都会 AttributeError。改为 `from launcher_core.fast_install import configure as configure_downloads, fast_install`，两处调用点（`saveSettings`、启动期）改用别名。
+
+**修复**：
+- 新增 `tools/smoke_check.py`：读日志**增量**（记录起跑前 `Length` 作偏移，只看本次新写入），判据两条——① 出现 `MainWindow 初始化完成`（与网络无关，证明 configure/信号连接全走完）；② 出现 `versionsLoaded` 或 `获取版本列表失败`（断网属合法环境同样放行，两者都缺 = 页面根本没加载）。中文标记定义在 Python 侧，规避 `.ps1` 无 BOM 被按 ANSI 解读的编码坑
+- `build_exe.ps1`：`$logged`（LastWriteTime）→ 调用 `smoke_check.py $logPath $beforeLen`，`$booted=$LASTEXITCODE -eq 0`，成功条件 = `alive -and booted`
+- zip 阶段由只打包 `plugins/hello-sample` 改为遍历复制全部插件目录（现 4 个）
+
+**回归**：`tests/test_smoke_and_imports.py` 8 个用例——冒烟四分支（正常/断网/崩溃于 init 前/页面未加载）+ CLI 偏移语义 + 构建脚本接线，以及一个**跨全仓 AST 检查**：凡 `from launcher_core.X import Y` 且 `Y` 是普通函数，全仓 `.py` 中不得出现 `Y.attr` 形式的属性访问，从机制上封死「函数遮蔽模块名」这一类崩溃。全量门 **pytest 363 passed + py_compile 60 文件 + node --check 内联 1 block 全绿**。
+
+**构建实证**：`dist/DevLauncher.exe` 207,621,521 字节；`dist/DevLauncher-b1.2-win64.zip` 206,610,933 字节、14 条目、4 个插件全进包；冒烟输出 `boot ok (page=versionsLoaded)`；日志含 `MainWindow 初始化完成` + `versionsLoaded (长度: 296604)`、919 个版本，且**无** attribute 错误。
+
+**反向验证（证明判据真能抓到那个崩溃）**：把启动期 `configure_downloads(` 临时改回 `fast_install.configure(` 重建 → 冒烟三次均报 `启动未完成，缺少标记: MainWindow 初始化完成; versionsLoaded 或 获取版本列表失败`，其中 `alive=True exit=- booted=False`——**正是旧判据会误判为成功的那一组**（假活 + 日志有新增）——构建在 `throw 'smoke failed 3 times'` 处中止，`dist/DevLauncher.exe` 未被放行为好包；改回后重建 `boot ok (page=versionsLoaded)` + BUILD OK。注意：崩溃的 exe 会弹异常对话框占住文件句柄，`throw` 跳过了脚本末尾的进程清理段，再次构建前须手工 `Stop-Process` 全部 `DevLauncher`/`QtWebEngine` 进程，否则 PyInstaller 报 `PermissionError: [WinError 5]` 写 exe。
+
+### 账户页签整合皮肤与披风（2026-10-17）
+
+**需求**：把设置里的「皮肤与披风」连同账户管理一起拆到新页签，位置在「插件」上方。现状：皮肤与披风在 `#settingsPage` 里，账户管理本就是独立页签 `#accountPage`（位于设置**之前**）——设置页里并没有账户分组。因此落地取向是：皮肤分组迁入 `#accountPage`，账户页签重新排到设置之后、插件之前（不新增第九个页签，避免账户界面重复两份）。
+
+**改动**（均在 `ui/index.html`）：
+- 从 `#settingsPage` 删除「皮肤与披风」整个 `settings-group`（预览图、variant 下拉、更换皮肤/刷新、披风列表、隐藏披风、说明区）
+- 同一块标记原样迁入 `#accountPage` 的 480px 容器内、紧接账户卡列表之后
+- 侧栏顺序由 versions→download→mods→worlds→resourcepacks→**account**→settings→plugins 改为 …→resourcepacks→settings→**account**→plugins
+- `navigateTo()` 的刷新职责从 `page === 'settings'` 分支搬到 `page === 'account'` 分支：进账户页同时拉 `getAccounts()` 与 `skinsRefreshNow()`；空了的 settings 分支直接删掉
+
+**红绿**：`tests/test_account_skin_tab.js` **34 断言**（RED 16 FAIL → GREEN 34/0）——区块切片后断言设置页不再含 `skinPreview`/`capeList`/`skinVariant`、账户页接管全部控件、`皮肤与披风` 全局仅 1 次（防重复分组）、侧栏顺序严格等于预期数组且 account 紧邻 plugins 上方、`navigateTo` 的 account 分支含 `skinsRefreshNow()` 而 settings 分支不再含。
+
+**门禁**：pytest **363 passed**；17 个 node 测试文件共 **1010 断言 0 失败**（新增的 34 使旧基线 976 升至 1010）；`py_compile` 60 文件 rc=0；`node --check` 内联 1 block + `ui/i18n.js`/`ui/i18n_dict.js` rc=0。
+`tools/i18n` 重跑后 `strings.json` 与 `ui/i18n_dict.js` **字节级不变**（347 键 / 402 单元）——收集器按 sha1 排序，与标记在文档中的位置无关，搬家不会产生新文案也不会重排词典。
+### 皮肤/披风标签置顶 + 令牌过期自动刷新（2026-10-17）
+
+**需求**（用户报障 + 截图）：① 账户页「当前皮肤」这类标签竖排（一字一行）且被挤在卡片内，要求改成暗灰色小标题放到卡片**上方**（「卡钳」为用户笔误，实指「卡片」）；② 皮肤/披风加载失败。
+
+**竖排根因**：`.settings-item { display:flex; justify-content:space-between }` + `.settings-item-label { flex:1 }`（即 `flex: 1 1 0%`）。长值（`皮肤/披风请求失败: HTTP 401: Unauthorized`、或整段说明文字）的 `flex-basis: auto` 吃掉整行宽度，标签 basis 为 0 被压到 0 宽 → 中文逐字换行。同一分组的「说明」行有完全相同的缺陷。
+
+**401 根因**：`~/.mc-launcher/accounts.json` 中微软账号 `DishonesINcludeX` 的 `access_token` 是 XBOX JWT（`exp=1789274269` = 2026-09-13，**已过期 34 天**），而全仓从无 `auth.refresh_login()` 调用——令牌只在登录时取一次，此后永久复用。日志现场：`GET /minecraft/profile HTTP/1.1" 401 35`。
+
+**改动**：
+- `ui/index.html`：新增作用域类 `.skin-cape-caption`（`width:100%; flex:none; font-size:12px; color:rgba(255,255,255,0.42)`）与 `.settings-item--skin-cape`（`flex-wrap:wrap` + `> * { min-width:0 }`）；「当前皮肤 / 披风 / 说明」三个标签从卡片内的 `.settings-item-label` 上移为卡片外的小标题（块级 `<div>`，`width:100%` 才独占一行）；通用 `.settings-item-label { flex:1 }` 未动，其他设置项外观不变
+- `launcher_core/tokens.py`（新）：`jwt_expiry(token) -> int | None`（就地 base64url 解 payload 取 `exp`，段数/base64/缺 `exp`/payload 非 dict/`exp` 非数字等畸形输入一律返回 `None`，绝不抛）、`is_expired(token, now=None, skew=60)`（`exp <= now + skew` 视为过期，`exp` 未知一律 `False`）
+- `launcher_core/skins.py`：新增 `is_unauthorized(exc)`、`ensure_fresh_token(access_token, refresh)`（离线标记原样放行；仅本地判定已过期才 `refresh()`）、`call_with_refresh(call, access_token, refresh)`（401 → 刷新一次 → 换新 token 重试一次；刷新为空/同值 → `raise SkinError("登录已过期，请重新登录") from exc`；非 401 直接透传；只重试一次）
+- `main.py`：新增 `LauncherBridge._refresh_access_token()`（读 `get_login_data()` 的 `refresh_token` → `auth.refresh_login()`，异常不出线程，返回新 `access_token`）；`_skins_async` 串上 `ensure_fresh_token` / `call_with_refresh`，四个入口（刷新 / 上传 / 装备 / 隐藏）零契约变更
+
+**红绿**：
+- `tests/test_account_skin_tab.js` **34 → 43 断言**：3 个小标题必须是块级 `<div>`、每个都排在其卡片之前、卡片内不得再有 `.settings-item-label`、`.skin-cape-caption` 必须 `width:100%` + `flex:none`、`.settings-item--skin-cape` 必须 `flex-wrap:wrap`、通用 `.settings-item-label { flex:1 }` 不得被改
+- `tests/test_tokens.py`（新）**12 断言**：exp 提取、带/不带 `=` 填充、段数错、坏 base64、缺 `exp`、payload 非 dict、`exp` 非数字、已过期、skew 两侧边界、离线/非 JWT 串
+- `tests/test_skins.py` **+10 断言**：401→刷新→成功（断言第二次调用带的是新 token）、刷新返回 `None` 时抛精确文案 `登录已过期，请重新登录` 且 `__cause__` 链到首个 401、同值 token 也抛、非 401 直接透传且 refresh 不被调用、只重试一次、未过期不刷新、离线标记不动
+- **反向验证**：把 `.skin-cape-caption` 的 `<div>` 换成 `<span>`、把 `flex:none` 改成 `flex:1 1 auto`、删掉 `flex-wrap:wrap`、把标题挪到卡片之后——四种变异**全部 FAIL**，还原后 sha1 一致
+
+**视觉验证**（Edge headless 渲染真实 CSS + markup，包装页放在仓库外）：1100px 与 760px 宽、且向 `#skinsStatus` 注入真实错误串 `皮肤/披风请求失败: HTTP 401: Unauthorized` —— 三个小标题均为暗灰、独占一行、位于各自卡片上方；长错误串在卡片内正常换行，**全页不再出现任何逐字竖排**。
+
+**门禁**：pytest **385 passed**（旧基线 363 + 22）；17 个 node 测试文件共 **1019 断言 0 失败**（旧基线 1010 + 9）；`py_compile` 62 文件 rc=0；`node --check` 内联 1 block + `ui/i18n.js`/`ui/i18n_dict.js` rc=0。`tools/i18n` 两个产物字节级不变（`ui/i18n_dict.js` sha1 `6F93E5B0…`、`tools/i18n/strings.json` sha1 `5EEE7CCC…`）——文案未改、仅移动节点，而收集器按 sha1 排序、与标记位置无关。
+### 账户页披风预览 + 下拉框统一 + 微软四色 Logo（2026-10-18）
+
+**需求**（用户报障 + 2 张截图）：① 账户页显示披风预览、自动显示当前披风；② 「当前皮肤」的 variant 下拉框风格与其他控件不一致、文字看不见；③ Microsoft 图标换成微软品牌色。
+
+**根因**：① 披风卡片里只有 `#capeList` 与「隐藏披风」按钮，压根没有预览元素，装备披风后没有任何视觉反馈；② `#skinVariant` 是全仓唯一没走共享 `.settings-input` 的控件，靠一段内联 `background/border/color:#fff` 手写样式，且缺 `color-scheme:dark` —— 深色页面上原生下拉按浅色主题渲染，白字配白底即「文字看不见」；③ 微软图标是单色描边 svg（4 个空心 `rect`，`stroke="white"`），3 处字节完全相同。
+
+**改动**（均在 `ui/index.html`，**零 CSS 变更**）：
+- 披风卡片首位新增 `<img id="capePreview" style="width:64px;height:32px;object-fit:contain;image-rendering:pixelated;border-radius:6px;background:rgba(0,0,0,0.25);display:none;">`（64x32 即披风纹理尺寸）
+- `renderCapeList(capes)`：在 `!capes.length` 早退**之前**处理预览 —— 取 ACTIVE（否则取首个）披风的 `url` 写入 `src` 并 `display:block`；无 url 或空列表则 `removeAttribute('src')` + `display:none`。装备/隐藏披风走 Python `emit skinsResult` → `onSkinsResult` → `renderSkinsProfile` → `renderCapeList`，预览自动跟随，无需手动点「刷新」
+- `#skinVariant` 删除全部内联配色，改用 `class="settings-input"`（深色背景 + `color-scheme:dark` + `option` 深色主题），仅保留 `style="width:auto;min-width:160px;"` 以压过 `.settings-input` 的固定 120px 宽、保证选项文字不被裁剪
+- 微软图标 3 处（markup 登录按钮 + 2 处 `microsoftBtn.innerHTML` 字符串）换成四色品牌 `<rect fill="#F25022"/"#7FBA00"/"#00A4EF"/"#FFB900">`，去掉 `fill="none" stroke="white"`；全页仍有 29 处 `stroke="white"`（离线登录/退出登录等无关图标），未动
+
+**红绿**：`tests/test_account_skin_tab.js` **43 → 64 断言**（+21）——
+- `#capePreview` 全局恰 1 个、排在 `#capeList` 之前、是第 2 张 `.settings-item--skin-cape` 卡片的直接子元素（卡片开头到预览之间不含 `</div>`，排除塞进其它卡片）
+- `renderCapeList` 源码含 `capePreview`/`.src`/`.url`/`'none'`，且 `capePreview` 出现在 `暂无披风` 之前（证明隐藏路径覆盖了 `!capes.length` 早退分支）
+- `#skinVariant` 标签含 `class="settings-input"`，内联样式**不含** `background`/`border`/`color:`，含 `width:auto` + `min-width`
+- 四色 Logo 恰 3 处；单色版（`stroke="white"` 与 `<rect x="2" y="2"` 组合）0 处；4 个品牌色 hex 各在 Logo 标签内至少出现 1 次
+
+**视觉验证**（Edge headless 渲染真实 CSS + markup + **真实 `renderSkinsProfile`/`renderCapeList` 源码**，喂合成 64x32 披风纹理）：Case A（1 ACTIVE + 1 非 ACTIVE）披风卡片左侧显示披风预览图；Case B（空列表）预览隐藏、卡片内显示 `暂无披风`；两 Case 中 variant 下拉均为深色主题、文字清晰、与相邻「更换皮肤 / 刷新」同风格；Microsoft 登录按钮为四色品牌图标。
+
+**门禁**：pytest **385 passed**；17 个 node 测试文件共 **1040 断言 0 失败**（旧基线 1019 + 21）；`py_compile` 62 文件 rc=0；`node --check` 内联 1 block + `ui/i18n.js`/`ui/i18n_dict.js` rc=0。`tools/i18n` 两个产物字节级不变（`ui/i18n_dict.js` sha1 `6F93E5B0…`、`tools/i18n/strings.json` sha1 `5EEE7CCC…`）—— 未改动任何用户可见文本，仅新增控件与图标。

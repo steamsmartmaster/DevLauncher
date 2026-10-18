@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DevLauncher</title>
     <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="i18n_dict.js"></script>
+<script src="i18n.js"></script>
     <style>
         .icon {
             width: 1em;
@@ -267,6 +269,10 @@
             cursor: pointer;
             transition: all 0.3s;
             position: relative;
+            /* 离屏卡片跳过样式+布局，切换页面时不再整表重排（105 张卡实测 59.3ms -> 6.9ms） */
+            content-visibility: auto;
+            /* auto 前缀：首次布局前用 129px 占位（实测卡片高度），布局后回填真实值，避免滚动条跳动 */
+            contain-intrinsic-size: auto 129px;
         }
 
         .version-loader-icon {
@@ -1296,6 +1302,64 @@
             border-radius: 12px;
             padding: 16px;
         }
+        .game-options-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin: 12px 0;
+            font-size: 12px;
+            color: var(--text-secondary, rgba(255,255,255,0.6));
+        }
+        .game-options-groups { display: flex; flex-direction: column; gap: 16px; }
+        .game-options-group {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 12px 16px;
+        }
+        .game-options-group-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+        .game-option-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 0;
+            border-top: 1px solid rgba(255,255,255,0.06);
+        }
+        .game-option-row:first-of-type { border-top: none; }
+        .game-option-label {
+            flex: 0 0 140px;
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+        .game-option-hint {
+            display: block;
+            font-size: 11px;
+            color: var(--text-secondary, rgba(255,255,255,0.5));
+        }
+        .game-option-control { flex: 1; display: flex; align-items: center; gap: 10px; }
+        .game-option-control input[type="range"] { flex: 1; }
+        .game-option-control select,
+        .game-option-control input[type="text"] {
+            width: 100%;
+            padding: 6px 8px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: rgba(255,255,255,0.06);
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+        .game-option-value {
+            min-width: 48px;
+            text-align: right;
+            font-size: 12px;
+            color: var(--text-secondary, rgba(255,255,255,0.7));
+            font-variant-numeric: tabular-nums;
+        }
 
         .version-folders-header {
             display: flex;
@@ -1442,6 +1506,33 @@
             display: flex;
             align-items: center;
             gap: 8px;
+        }
+
+        /* Scoped to the skin & cape group on the account page only.
+           Captions sit ABOVE the card (outside the rounded box), so they are
+           never part of the flex row that squeezes .settings-item-label to zero
+           width (the original "one glyph per line" bug when a long status like
+           "HTTP 401: Unauthorized" inflated the value's min-content width).
+           The card itself only holds controls; its content wraps instead of
+           collapsing. Every other .settings-item keeps its existing appearance. */
+        .settings-item.settings-item--skin-cape {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: flex-start;
+            gap: 8px 10px;
+        }
+
+        .settings-item--skin-cape > * {
+            min-width: 0;
+        }
+
+        .skin-cape-caption {
+            flex: none; /* unshrinkable: never collapses even under wrap pressure */
+            width: 100%;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.42);
+            padding: 0 2px 6px 2px;
         }
 
         .settings-input {
@@ -2030,6 +2121,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
             padding: 10px 12px;
             border-radius: 8px;
             cursor: pointer;
@@ -2071,6 +2163,47 @@
         .vp-badge-neoforge { background: rgba(168, 85, 247, 0.2); color: #c084fc; }
         .vp-badge-quilt { background: rgba(249, 115, 22, 0.2); color: #fb923c; }
         .vp-badge-optifine { background: rgba(234, 179, 8, 0.2); color: #facc15; }
+
+        .vp-deps {
+            flex-basis: 100%;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .vp-deps-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            font-size: 12px;
+        }
+
+        .vp-deps-label {
+            min-width: 52px;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .vp-dep-req {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .vp-dep-opt {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
 
         .mod-loaders-list {
             display: flex;
@@ -2567,13 +2700,13 @@
                     <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
                     <span class="tooltip">资源包管理</span>
                 </div>
-                <div class="nav-item" data-page="account">
-                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                    <span class="tooltip">账户</span>
-                </div>
                 <div class="nav-item" data-page="settings">
                     <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                     <span class="tooltip">设置</span>
+                </div>
+                <div class="nav-item" data-page="account">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <span class="tooltip">账户</span>
                 </div>
                 <div class="nav-item" data-page="plugins">
                     <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px;"><path d="M10.5 2.5a2 2 0 0 1 4 0V5h4a2 2 0 0 1 2 2v4h-1.5a2.5 2.5 0 0 0 0 5H21v4a2 2 0 0 1-2 2h-4v-1.5a2.5 2.5 0 0 0-5 0V22H5a2 2 0 0 1-2-2v-4h1.5a2.5 2.5 0 0 0 0-5H3V7a2 2 0 0 1 2-2h5.5z"/></svg>
@@ -2907,6 +3040,27 @@
                     </div>
                 </div>
 
+                <div class="page" id="versionGameOptionsPage">
+                    <div class="mods-toolbar">
+                        <button class="back-btn" onclick="navigateTo('versionManager')">
+                            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><polyline points="15 18 9 12 15 6"/></svg>
+                            返回
+                        </button>
+                        <div class="toolbar-title">游戏设置 - <span id="gameOptionsVersion">-</span></div>
+                        <button class="settings-file-btn" onclick="openGameOptionsFolder()" title="打开 options.txt 所在文件夹">
+                            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> 文件夹
+                        </button>
+                        <button class="settings-file-btn" onclick="saveGameOptions()">
+                            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> 保存
+                        </button>
+                    </div>
+                    <div class="game-options-meta">
+                        <span class="game-options-path" id="gameOptionsPath"></span>
+                        <span class="game-options-note" id="gameOptionsNote"></span>
+                    </div>
+                    <div id="gameOptionsGroups" class="game-options-groups"></div>
+                </div>
+
                 <div class="page" id="versionModsPage">
                     <div class="mods-toolbar">
                         <button class="back-btn" onclick="navigateTo('versionManager')">
@@ -3024,6 +3178,13 @@
                             <div class="version-mgmt-label">版本设置</div>
                             <div class="version-mgmt-desc">Java、内存等设置</div>
                         </div>
+                        <div class="version-mgmt-card" onclick="openGameOptions()">
+                            <div class="version-mgmt-icon">
+                                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:24px;height:24px;"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                            </div>
+                            <div class="version-mgmt-label">游戏设置</div>
+                            <div class="version-mgmt-desc">画质、声音、控制</div>
+                        </div>
                     </div>
                     <div class="version-isolation-section">
                         <div class="version-isolation-header">
@@ -3096,7 +3257,7 @@
                                 <div class="account-add-title">添加账号</div>
                                 <div class="account-actions">
                                     <button class="account-btn login-microsoft" onclick="startLogin()">
-                            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><rect x="2" y="2" width="9" height="9"/><rect x="13" y="2" width="9" height="9"/><rect x="2" y="13" width="9" height="9"/><rect x="13" y="13" width="9" height="9"/></svg> Microsoft 登录
+                            <svg class="icon" viewBox="0 0 24 24" style="width:14px;height:14px;"><rect x="2" y="2" width="9" height="9" fill="#F25022"/><rect x="13" y="2" width="9" height="9" fill="#7FBA00"/><rect x="2" y="13" width="9" height="9" fill="#00A4EF"/><rect x="13" y="13" width="9" height="9" fill="#FFB900"/></svg> Microsoft 登录
                                     </button>
                                     <button class="account-btn login-offline" onclick="toggleOfflineForm()">
                                         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> 离线登录
@@ -3110,6 +3271,32 @@
                             <button class="account-btn logout-btn" id="logoutBtn" style="display: none; margin-top: 12px;" onclick="logout()">
                                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> 退出登录
                             </button>
+                        </div>
+                        <div class="settings-group">
+                            <div class="settings-group-title">皮肤与披风</div>
+                            <div class="skin-cape-caption">当前皮肤</div>
+                            <div class="settings-item settings-item--skin-cape">
+                                <img id="skinPreview" alt="" style="width:64px;height:64px;image-rendering:pixelated;border-radius:6px;background:rgba(0,0,0,0.25);display:none;">
+                                <select class="settings-input" id="skinVariant" style="width:auto;min-width:160px;">
+                                    <option value="slim">纤细 Slim (Alex)</option>
+                                    <option value="classic">经典 Classic (Steve)</option>
+                                </select>
+                                <button class="settings-file-btn" onclick="pickSkinFile()">更换皮肤</button>
+                                <button class="settings-file-btn" onclick="skinsRefreshNow()">刷新</button>
+                                <span id="skinsStatus" style="opacity:0.7;font-size:12px;"></span>
+                            </div>
+                            <div class="skin-cape-caption">披风</div>
+                            <div class="settings-item settings-item--skin-cape">
+                                <img id="capePreview" alt="" style="width:64px;height:32px;object-fit:contain;image-rendering:pixelated;border-radius:6px;background:rgba(0,0,0,0.25);display:none;">
+                                <div id="capeList" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+                                <button class="settings-file-btn" onclick="capeHide()">隐藏披风</button>
+                            </div>
+                            <div class="skin-cape-caption">说明</div>
+                            <div class="settings-item settings-item--skin-cape">
+                                <div class="settings-item-value">
+                                    <span style="opacity:0.65;font-size:12px;line-height:1.6;">需要微软正式账号；离线账号无法更改。披风只能在已拥有的之中切换，不支持自定义上传。</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -3232,6 +3419,21 @@
                             </div>
                         </div>
                         <div class="settings-group">
+                            <div class="settings-group-title">下载设置</div>
+                            <div class="settings-item">
+                                <div class="settings-item-label">下载代理</div>
+                                <div class="settings-item-value">
+                                    <input type="text" class="settings-input" id="downloadProxy" value="" placeholder="http://127.0.0.1:7890" style="width: 300px;" onchange="saveSettings()">
+                                </div>
+                            </div>
+                            <div class="settings-item">
+                                <div class="settings-item-label">下载并发数</div>
+                                <div class="settings-item-value">
+                                    <input type="number" class="settings-input" id="downloadWorkers" value="16" min="1" max="64" step="1" style="width: 100px;" onchange="saveSettings()">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="settings-group">
                             <div class="settings-group-title">界面设置</div>
                             <div class="settings-item">
                                 <div class="settings-item-label">背景图片</div>
@@ -3282,6 +3484,18 @@
                                     <button class="settings-file-btn" onclick="setPresetTheme('#3b82f6','#3b82f6','#8b5cf6')" title="蓝紫">蓝紫</button>
                                     <button class="settings-file-btn" onclick="setPresetTheme('#22c55e','#22c55e','#16a34a')" title="绿色">绿色</button>
                                     <button class="settings-file-btn" onclick="setPresetTheme('#f59e0b','#f59e0b','#d97706')" title="琥珀">琥珀</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="settings-group" id="localeGroup">
+                            <div class="settings-group-title">界面语言</div>
+                            <div class="settings-item">
+                                <div class="settings-item-label">语言</div>
+                                <div class="settings-item-value">
+                                    <select id="uiLocale" onchange="changeLocale(this.value)" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:6px;color:#fff;padding:6px 10px;font-size:13px;cursor:pointer;">
+                                        <option value="zh-CN">简体中文</option>
+                                        <option value="en">English</option>
+                                    </select>
                                 </div>
                             </div>
                         </div>
@@ -3441,6 +3655,7 @@
                 if (pythonInterface && pythonInterface.getAccounts) {
                     pythonInterface.getAccounts();
                 }
+                skinsRefreshNow();
             } else if (page === 'plugins') {
                 // 规格16③: 每次进入插件页重置子视图回列表 (仍保留 getPlugins 刷新)
                 setPluginView('list');
@@ -3757,6 +3972,9 @@
                     '<button class="version-action-btn" onclick="event.stopPropagation();duplicateVersionPrompt(\'' + v.id + '\')" title="复制">' +
                     '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>' +
                     '</button>' +
+                    '<button class="version-action-btn" onclick="event.stopPropagation();exportMrpack(\'' + v.id + '\')" title="导出 mrpack">' +
+                    '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>' +
+                    '</button>' +
                     '<button class="version-action-btn version-action-delete" onclick="event.stopPropagation();deleteVersionConfirm(\'' + v.id + '\')" title="删除">' +
                     '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
                     '</button>' +
@@ -3806,6 +4024,24 @@
                     pythonInterface.deleteVersion(versionId);
                     setTimeout(function() { loadVersions(); }, 500);
                 }
+            }
+        }
+
+        function exportMrpack(versionId) {
+            if (!pythonInterface || !pythonInterface.exportMrpack) {
+                showToast('导出失败：桥接未就绪', 'error'); return;
+            }
+            showToast('正在导出 ' + versionId + ' 为 mrpack…', 'info');
+            pythonInterface.exportMrpack(versionId);
+        }
+
+        function onMrpackExported(data) {
+            if (!data) { showToast('导出失败：无返回数据', 'error'); return; }
+            if (data.success) {
+                showToast('已导出 ' + (data.mod_count || 0) + ' 个模组、'
+                    + (data.override_count || 0) + ' 个文件 → ' + data.path, 'success');
+            } else {
+                showToast('导出失败: ' + (data.error || '未知错误'), 'error');
             }
         }
 
@@ -4004,6 +4240,131 @@
                 return;
             }
             navigateTo('settings');
+        }
+
+        function openGameOptions() {
+            if (!selectedVersion) {
+                alert('请先选择一个版本');
+                return;
+            }
+            document.getElementById('gameOptionsVersion').textContent = selectedVersion;
+            document.getElementById('gameOptionsPath').textContent = '';
+            document.getElementById('gameOptionsNote').textContent = '正在读取…';
+            document.getElementById('gameOptionsGroups').innerHTML = '';
+            navigateTo('versionGameOptions');
+            if (pythonInterface && pythonInterface.getGameOptions) {
+                pythonInterface.getGameOptions(selectedVersion);
+            }
+        }
+
+        function openGameOptionsFolder() {
+            if (pythonInterface && pythonInterface.openOptionsFolder) {
+                pythonInterface.openOptionsFolder(selectedVersion);
+            }
+        }
+
+        function renderGameOptions(payload) {
+            var pathEl = document.getElementById('gameOptionsPath');
+            var noteEl = document.getElementById('gameOptionsNote');
+            var box = document.getElementById('gameOptionsGroups');
+            if (!box) return;
+            if (!payload || payload.error) {
+                noteEl.textContent = '读取失败: ' + ((payload && payload.error) || '无返回');
+                box.innerHTML = '';
+                return;
+            }
+            pathEl.textContent = payload.path || '';
+            noteEl.textContent = payload.exists
+                ? ('识别到 ' + (payload.unknown_count || 0) + ' 个启动器不认识的键，保存时会原样保留。')
+                : '尚未生成 options.txt，保存后会创建（游戏默认值）。';
+            var values = payload.values || {};
+            var specs = payload.specs || [];
+            var byGroup = {};
+            specs.forEach(function(s) {
+                (byGroup[s.group] = byGroup[s.group] || []).push(s);
+            });
+            var html = '';
+            Object.keys(byGroup).forEach(function(group) {
+                html += '<div class="game-options-group">' +
+                    '<div class="game-options-group-title">' + escapeHtml(group) + '</div>';
+                byGroup[group].forEach(function(s) {
+                    var val = (s.key in values) ? values[s.key] : s.default;
+                    var orig = JSON.stringify(val);
+                    var hint = s.hint ? '<span class="game-option-hint">' + escapeHtml(s.hint) + '</span>' : '';
+                    var control = '';
+                    if (s.type === 'bool') {
+                        control = '<label class="switch"><input type="checkbox" data-key="' +
+                            escapeHtml(s.key) + '" data-orig="' + escapeHtml(orig) + '"' +
+                            (val ? ' checked' : '') + '><span class="slider"></span></label>';
+                    } else if (s.type === 'int' || s.type === 'float') {
+                        var step = s.type === 'int' ? 1 : 0.01;
+                        control = '<input type="range" min="' + s.minimum + '" max="' + s.maximum +
+                            '" step="' + step + '" value="' + val + '" data-key="' + escapeHtml(s.key) +
+                            '" data-type="' + s.type + '" data-orig="' + escapeHtml(orig) +
+                            '" oninput="this.nextElementSibling.textContent=this.value">' +
+                            '<span class="game-option-value">' + escapeHtml(String(val)) + '</span>';
+                    } else if (s.type === 'choice') {
+                        control = '<select data-key="' + escapeHtml(s.key) + '" data-orig="' + escapeHtml(orig) + '">';
+                        (s.choices || []).forEach(function(c) {
+                            control += '<option value="' + escapeHtml(c) + '"' +
+                                (c === String(val) ? ' selected' : '') + '>' + escapeHtml(c) + '</option>';
+                        });
+                        control += '</select>';
+                    } else {
+                        control = '<input type="text" value="' + escapeHtml(String(val)) +
+                            '" data-key="' + escapeHtml(s.key) + '" data-orig="' + escapeHtml(orig) + '">';
+                    }
+                    html += '<div class="game-option-row">' +
+                        '<div class="game-option-label">' + escapeHtml(s.label) + hint + '</div>' +
+                        '<div class="game-option-control">' + control + '</div></div>';
+                });
+                html += '</div>';
+            });
+            box.innerHTML = html;
+        }
+
+        function collectGameOptionsUpdates() {
+            var out = {};
+            var root = document.getElementById('gameOptionsGroups');
+            if (!root) return out;
+            root.querySelectorAll('[data-key]').forEach(function(el) {
+                var key = el.getAttribute('data-key');
+                var orig = el.getAttribute('data-orig');
+                var value;
+                if (el.type === 'checkbox') {
+                    value = el.checked;
+                } else if (el.type === 'range') {
+                    value = el.getAttribute('data-type') === 'int'
+                        ? parseInt(el.value, 10) : parseFloat(el.value);
+                } else {
+                    value = el.value;
+                }
+                if (JSON.stringify(value) !== orig) out[key] = value;
+            });
+            return out;
+        }
+
+        function saveGameOptions() {
+            if (!pythonInterface || !pythonInterface.saveGameOptions) {
+                showToast('保存失败：桥接未就绪', 'error');
+                return;
+            }
+            var updates = collectGameOptionsUpdates();
+            if (Object.keys(updates).length === 0) {
+                showToast('没有改动', 'info');
+                return;
+            }
+            showToast('正在保存 ' + Object.keys(updates).length + ' 项…', 'info');
+            pythonInterface.saveGameOptions(selectedVersion, JSON.stringify(updates));
+        }
+
+        function onGameOptionsSaved(data) {
+            if (data && data.success) {
+                showToast('已保存 ' + ((data.updated && data.updated.length) || 0) + ' 项到 ' + data.path, 'success');
+                pythonInterface && pythonInterface.getGameOptions && pythonInterface.getGameOptions(selectedVersion);
+            } else {
+                showToast('保存失败: ' + ((data && data.error) || '未知错误'), 'error');
+            }
         }
 
         function loadModsFromLauncher() {
@@ -5558,6 +5919,30 @@
             list.innerHTML = html;
         }
 
+        function renderVersionDeps(deps, versionId) {
+            if (!deps || !deps.length) return '';
+            var req = '', opt = '';
+            deps.forEach(function(d) {
+                if (!d || !d.project_id) return;
+                if (d.dependency_type === 'incompatible') return;
+                var label = escapeHtml(d.title || d.project_id);
+                if (d.dependency_type === 'optional') {
+                    opt += '<label class="vp-dep-opt">' +
+                        '<input type="checkbox" data-project="' + escapeHtml(d.project_id) +
+                        '" data-version="' + escapeHtml(versionId || '') + '">' +
+                        label + '</label>';
+                } else if (d.dependency_type === 'required') {
+                    req += '<span class="vp-dep-req" title="' + escapeHtml(d.slug || d.project_id) + '">' +
+                        label + '</span>';
+                }
+            });
+            if (!req && !opt) return '';
+            var out = '<div class="vp-deps" onclick="event.stopPropagation()">';
+            if (req) out += '<div class="vp-deps-row"><span class="vp-deps-label">依赖</span>' + req + '</div>';
+            if (opt) out += '<div class="vp-deps-row"><span class="vp-deps-label">可选依赖</span>' + opt + '</div>';
+            return out + '</div>';
+        }
+
         function renderVersionPickerItem(v, isRecommended) {
             var badges = '';
             (v.loaders || []).forEach(function(l) {
@@ -5574,7 +5959,7 @@
                 '<div class="vp-meta"><span>' + versions + '</span>' + badges + '</div>' +
                 '</div>' +
                 '<div class="vp-meta"><span>↓ ' + formatNumber(v.downloads || 0) + '</span></div>' +
-                '</div>';
+                '</div>' + renderVersionDeps(v.dependencies, v.id);
         }
 
         function filterPickerVersions() {
@@ -5584,13 +5969,16 @@
         function pickModVersion(versionId, versionName) {
             var cb = versionPickerCallback;
             var customName = document.getElementById('versionPickerName').value.trim();
+            var optional = [];
+            document.querySelectorAll('.vp-dep-opt input[data-version="' + versionId + '"]').forEach(function(box) {
+                if (box.checked && box.dataset && box.dataset.project) optional.push(box.dataset.project);
+            });
             closeVersionPicker();
             if (cb) {
-                cb(versionId, versionName, customName);
+                cb(versionId, versionName, customName, optional);
             } else {
-                // Default: download the mod version
                 if (pythonInterface && pythonInterface.downloadModVersion) {
-                    pythonInterface.downloadModVersion('', versionId);
+                    pythonInterface.downloadModVersion('', versionId, JSON.stringify(optional));
                 }
             }
         }
@@ -5960,9 +6348,9 @@
 
         // === Download with version picker for mods ===
         function downloadModWithPicker(contentId) {
-            openVersionPicker(contentId, 'mods', function(versionId, versionName) {
+            openVersionPicker(contentId, 'mods', function(versionId, versionName, customName, optional) {
                 if (pythonInterface && pythonInterface.downloadModVersion) {
-                    pythonInterface.downloadModVersion(contentId, versionId);
+                    pythonInterface.downloadModVersion(contentId, versionId, JSON.stringify(optional || []));
                 }
             });
         }
@@ -6062,7 +6450,7 @@
             var microsoftBtn = document.querySelector('.login-microsoft');
             if (microsoftBtn) {
                 microsoftBtn.disabled = false;
-                microsoftBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><rect x="2" y="2" width="9" height="9"/><rect x="13" y="2" width="9" height="9"/><rect x="2" y="13" width="9" height="9"/><rect x="13" y="13" width="9" height="9"/></svg> Microsoft 登录';
+                microsoftBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24" style="width:14px;height:14px;"><rect x="2" y="2" width="9" height="9" fill="#F25022"/><rect x="13" y="2" width="9" height="9" fill="#7FBA00"/><rect x="2" y="13" width="9" height="9" fill="#00A4EF"/><rect x="13" y="13" width="9" height="9" fill="#FFB900"/></svg> Microsoft 登录';
             }
             document.getElementById('sidebarLoginType').textContent = isLoggedIn ? '已登录' : '点击登录';
         }
@@ -6094,7 +6482,7 @@
             var microsoftBtn = document.querySelector('.login-microsoft');
             if (microsoftBtn) {
                 microsoftBtn.disabled = false;
-                microsoftBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><rect x="2" y="2" width="9" height="9"/><rect x="13" y="2" width="9" height="9"/><rect x="2" y="13" width="9" height="9"/><rect x="13" y="13" width="9" height="9"/></svg> Microsoft 登录';
+                microsoftBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24" style="width:14px;height:14px;"><rect x="2" y="2" width="9" height="9" fill="#F25022"/><rect x="13" y="2" width="9" height="9" fill="#7FBA00"/><rect x="2" y="13" width="9" height="9" fill="#00A4EF"/><rect x="13" y="13" width="9" height="9" fill="#FFB900"/></svg> Microsoft 登录';
             }
 
             document.getElementById('sidebarUserName').textContent = data.name;
@@ -6726,6 +7114,8 @@
             document.getElementById('showSnapshots').checked = settings.show_snapshots !== false;
             document.getElementById('showOld').checked = settings.show_old || false;
             document.getElementById('minecraftDir').value = settings.minecraft_dir || '';
+            document.getElementById('downloadProxy').value = settings.download_proxy || '';
+            document.getElementById('downloadWorkers').value = settings.download_workers || 16;
             
             // Load theme settings
             document.getElementById('themePrimary').value = settings.theme_primary || '#ffffff';
@@ -6841,6 +7231,21 @@
             applyTheme();
         }
 
+        function changeLocale(loc) {
+            if (window.I18N) I18N.setLocale(loc);
+        }
+
+        function syncLocaleSelect() {
+            var el = document.getElementById('uiLocale');
+            if (el && window.I18N) el.value = I18N.locale();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', syncLocaleSelect);
+        } else {
+            syncLocaleSelect();
+        }
+
         function saveSettings() {
             var settings = {
                 max_memory: parseInt(document.getElementById('maxMemory').value),
@@ -6851,6 +7256,8 @@
                 window_height: parseInt(document.getElementById('windowHeight').value),
                 show_snapshots: document.getElementById('showSnapshots').checked,
                 show_old: document.getElementById('showOld').checked,
+                download_proxy: document.getElementById('downloadProxy').value.trim(),
+                download_workers: Math.max(1, parseInt(document.getElementById('downloadWorkers').value) || 16),
                 theme_primary: document.getElementById('themePrimary').value,
                 theme_gradient_start: document.getElementById('themeGradientStart').value,
                 theme_gradient_end: document.getElementById('themeGradientEnd').value
@@ -6931,6 +7338,115 @@
                 row.appendChild(useBtn);
                 row.appendChild(hideBtn);
                 box.appendChild(row);
+            });
+        }
+
+        function setSkinsStatus(msg) {
+            var el = document.getElementById('skinsStatus');
+            if (el) el.textContent = msg || '';
+        }
+
+        function skinsRefreshNow() {
+            setSkinsStatus('');
+            if (pythonInterface && pythonInterface.skinsRefresh) {
+                pythonInterface.skinsRefresh();
+            }
+        }
+
+        function pickSkinFile() {
+            if (pythonInterface && pythonInterface.selectSkinFile) {
+                pythonInterface.selectSkinFile();
+            }
+        }
+
+        function onSkinFileSelected(path) {
+            var variant = document.getElementById('skinVariant').value || 'slim';
+            setSkinsStatus('上传中…');
+            if (pythonInterface && pythonInterface.skinsUpload) {
+                pythonInterface.skinsUpload(path, variant);
+            }
+        }
+
+        function equipCape(capeId) {
+            if (pythonInterface && pythonInterface.capeEquip) {
+                pythonInterface.capeEquip(capeId);
+            }
+        }
+
+        function capeHide() {
+            if (pythonInterface && pythonInterface.capeHide) {
+                pythonInterface.capeHide();
+            }
+        }
+
+        function onSkinsResult(result) {
+            if (!result || !result.ok) {
+                setSkinsStatus((result && result.error) || '操作失败');
+                return;
+            }
+            setSkinsStatus('');
+            renderSkinsProfile(result.profile || {});
+        }
+
+        function renderSkinsProfile(profile) {
+            var list = profile.skins || [];
+            var active = null;
+            for (var i = 0; i < list.length; i++) {
+                if (list[i].state === 'ACTIVE') { active = list[i]; break; }
+            }
+            if (!active && list.length) active = list[0];
+            var img = document.getElementById('skinPreview');
+            if (active && active.url) {
+                img.src = active.url;
+                img.style.display = 'block';
+                var sel = document.getElementById('skinVariant');
+                if (sel && active.variant) sel.value = active.variant;
+            } else {
+                img.removeAttribute('src');
+                img.style.display = 'none';
+            }
+            renderCapeList(profile.capes || []);
+        }
+
+        function renderCapeList(capes) {
+            var box = document.getElementById('capeList');
+            if (!box) return;
+            box.innerHTML = '';
+            var preview = document.getElementById('capePreview');
+            if (preview) {
+                var activeCape = null;
+                for (var i = 0; i < capes.length; i++) {
+                    if (capes[i].state === 'ACTIVE') { activeCape = capes[i]; break; }
+                }
+                if (!activeCape && capes.length) activeCape = capes[0];
+                if (activeCape && activeCape.url) {
+                    preview.src = activeCape.url;
+                    preview.style.display = 'block';
+                } else {
+                    preview.removeAttribute('src');
+                    preview.style.display = 'none';
+                }
+            }
+            if (!capes.length) {
+                var none = document.createElement('span');
+                none.style.opacity = '0.6';
+                none.style.fontSize = '12px';
+                none.textContent = '暂无披风';
+                box.appendChild(none);
+                return;
+            }
+            capes.forEach(function(cape) {
+                var btn = document.createElement('button');
+                btn.className = 'settings-file-btn';
+                btn.textContent = (cape.alias || cape.id || '') +
+                    (cape.state === 'ACTIVE' ? '（使用中）' : '');
+                if (cape.state === 'ACTIVE') {
+                    btn.disabled = true;
+                    btn.style.opacity = '0.55';
+                } else {
+                    btn.onclick = function() { equipCape(cape.id); };
+                }
+                box.appendChild(btn);
             });
         }
 

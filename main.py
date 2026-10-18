@@ -34,6 +34,8 @@ from launcher_core import AuthManager, VersionManager, GameLauncher, Settings, M
 from launcher_core.plugins import PluginManager
 from launcher_core import clients_catalog
 from launcher_core import api_liquidbounce
+from launcher_core import skins
+from launcher_core import net as net_util
 from launcher_core.api_github import github_api
 from launcher_core.api_meteor import meteor_api
 from launcher_core.api_modloaders import (
@@ -42,7 +44,23 @@ from launcher_core.api_modloaders import (
     get_installed_loaders, ModLoaderVersion
 )
 from launcher_core.modpack_importer import ModpackImporter, ModpackInfo
+from launcher_core.game_options import (
+    build_updates,
+    coerce_value,
+    list_option_specs,
+    options_path,
+    read_options,
+    write_options,
+)
 from launcher_core.mod_manager import extract_client_mod_jar, remove_stale_client_mods
+from launcher_core.fast_install import configure as configure_downloads, fast_install
+from launcher_core.api_modrinth import (
+    attach_project_info,
+    build_download_plan,
+    parse_chosen_ids,
+    parse_dependencies,
+    pick_dependency_version,
+)
 
 
 # === 日志配置 ===
@@ -145,12 +163,17 @@ class LauncherBridge(QObject):
     modpackImportProgress = pyqtSignal(str)  # JSON: {current, total, message, file_downloaded, file_total, files}
     modpackImportComplete = pyqtSignal(str)  # JSON result
     modpackInfoLoaded = pyqtSignal(str)  # JSON modpack info
+    mrpackExported = pyqtSignal(str)  # JSON: {success, path, error?, mod_count, override_count}
+    gameOptionsLoaded = pyqtSignal(str)  # JSON: {version_id, path, exists, specs, values, unknown_count}
+    gameOptionsSaved = pyqtSignal(str)  # JSON: {success, error?, path, updated: [key]}
     accountsLoaded = pyqtSignal(str)  # JSON 账号列表摘要 (store.list(), 不含 data)
     pluginsLoaded = pyqtSignal(str)  # JSON 插件摘要列表 (PluginManager.scan())
     pluginDetailLoaded = pyqtSignal(str)  # JSON 插件详情 (save 后带 success/error)
     clientsLoaded = pyqtSignal(str)  # JSON 客户端目录列表 (clients_catalog.get_catalog())
     clientDownloadFinished = pyqtSignal(str)  # JSON {id, ok, message}
     javasScanned = pyqtSignal(str)  # JSON: {javas, recommend, mc_version, error?}
+    skinsResult = pyqtSignal(str)  # JSON: {ok, profile?, error?}，profile 见 skins.list_profile
+    skinFileSelected = pyqtSignal(str)  # 用户在文件对话框里选中的皮肤 PNG 绝对路径
 
     def __init__(self, auth: AuthManager, versions: VersionManager, game: GameLauncher, settings: Settings, mods: ModManager):
         super().__init__()
@@ -650,15 +673,9 @@ class LauncherBridge(QObject):
         """Install a Minecraft version"""
         logger.info(f"安装版本: {version_id}")
 
-        # mll 只在 libraries/assets 两段回调 setMax；两段按权重拼成整体百分比
-        phase_weights = (0.6, 0.4)
-
         def _install():
             file_count = [0]
             current_file = [""]
-            phase_no = [0]
-            phase_max = [0]
-            phase_cur = [0]
             pct = [-1.0]
 
             def emit_progress():
@@ -667,25 +684,12 @@ class LauncherBridge(QObject):
                     f"[{file_count[0]}] {current_file[0]}",
                 )
 
-            def on_set_max(max_count):
-                phase_no[0] += 1
-                phase_max[0] = max_count
-                phase_cur[0] = 0
-                emit_pct()
+            def on_set_max(_max_count):
+                # fast_install 已把并发相位归一成单相位，setMax(100) 只报一次
+                pass
 
-            def on_set_progress(current):
-                phase_cur[0] = current
-                emit_pct()
-
-            def emit_pct():
-                idx = min(phase_no[0], len(phase_weights)) - 1
-                if idx < 0:
-                    return
-                frac = phase_cur[0] / phase_max[0] if phase_max[0] > 0 else 0.0
-                # mll 的 setMax 传 len-1 而计数到 len，frac 会短暂 >1
-                frac = min(max(frac, 0.0), 1.0)
-                done = sum(phase_weights[:idx])
-                pct[0] = min(99.0, (done + frac * phase_weights[idx]) * 100)
+            def on_set_progress(value):
+                pct[0] = min(99.0, max(0.0, float(value)))
                 emit_progress()
 
             def on_status(status):
@@ -725,6 +729,10 @@ class LauncherBridge(QObject):
             settings = json.loads(settings_json)
             for key, value in settings.items():
                 self.settings.set(key, value)
+            configure_downloads(
+                workers=self.settings.get('download_workers', 16),
+                proxy=self.settings.get('download_proxy', ''),
+            )
             logger.info("设置保存成功")
         except Exception as e:
             logger.error(f"保存设置失败: {e}", exc_info=True)
@@ -797,6 +805,83 @@ class LauncherBridge(QObject):
             hidden.append(path)
             self.settings.set('java_hidden', hidden)
         logger.info(f"隐藏 Java: {path}")
+
+    def _refresh_access_token(self) -> str | None:
+        """皮肤/披风专用：用 refresh_token 换新 access_token；失败返回 None，异常不出线程。"""
+        try:
+            login = self.auth.get_login_data() or {}
+            refresh_token = login.get("refresh_token", "")
+            if not refresh_token:
+                return None
+            logger.info("正在刷新微软访问令牌（皮肤/披风）")
+            new_data = self.auth.refresh_login(refresh_token) or {}
+            return new_data.get("access_token")
+        except Exception as e:
+            logger.error(f"刷新访问令牌失败: {e}", exc_info=True)
+            return None
+
+    def _skins_async(self, work) -> None:
+        def _run():
+            try:
+                login = self.auth.get_login_data() or {}
+                token = skins.ensure_fresh_token(
+                    login.get("access_token", ""), self._refresh_access_token)
+                session = net_util.build_session()
+                profile = skins.call_with_refresh(
+                    lambda t: work(t, session), token,
+                    self._refresh_access_token)
+                self.skinsResult.emit(json.dumps(
+                    {"ok": True, "profile": profile}, ensure_ascii=False))
+            except Exception as e:
+                logger.error(f"皮肤/披风操作失败: {e}", exc_info=True)
+                self.skinsResult.emit(json.dumps(
+                    {"ok": False, "error": str(e)}, ensure_ascii=False))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    @pyqtSlot()
+    def selectSkinFile(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            None, "选择皮肤 PNG", "", "PNG 图片 (*.png)")
+        if file_path:
+            logger.info(f"皮肤文件已选择: {file_path}")
+            self.skinFileSelected.emit(file_path)
+
+    @pyqtSlot()
+    def skinsRefresh(self):
+        logger.info("刷新皮肤/披风列表")
+        self._skins_async(
+            lambda token, session: skins.list_profile(token, session=session))
+
+    @pyqtSlot(str, str)
+    def skinsUpload(self, path: str, variant: str):
+        logger.info(f"上传皮肤: {path} ({variant})")
+
+        def _work(token, session):
+            skins.upload_skin(token, path, variant=variant, session=session)
+            return skins.list_profile(token, session=session)
+
+        self._skins_async(_work)
+
+    @pyqtSlot(str)
+    def capeEquip(self, cape_id: str):
+        logger.info(f"装备披风: {cape_id}")
+
+        def _work(token, session):
+            skins.equip_cape(token, cape_id, session=session)
+            return skins.list_profile(token, session=session)
+
+        self._skins_async(_work)
+
+    @pyqtSlot()
+    def capeHide(self):
+        logger.info("隐藏披风")
+
+        def _work(token, session):
+            skins.hide_cape(token, session=session)
+            return skins.list_profile(token, session=session)
+
+        self._skins_async(_work)
 
     @pyqtSlot()
     def selectMinecraftDir(self):
@@ -1015,6 +1100,20 @@ class LauncherBridge(QObject):
                 logger.error(f"获取整合包信息失败: {e}", exc_info=True)
                 self.errorOccurred.emit(f"获取整合包信息失败: {e}")
         threading.Thread(target=_do_load, daemon=True).start()
+
+    @pyqtSlot(str)
+    def exportMrpack(self, version_name: str):
+        """Export an installed instance as a .mrpack (threaded)"""
+        logger.info(f"导出 mrpack: {version_name}")
+        def _do_export():
+            try:
+                importer = ModpackImporter(self.versions.minecraft_dir)
+                result = importer.export_mrpack(version_name)
+            except Exception as e:
+                logger.error(f"导出 mrpack 失败: {e}", exc_info=True)
+                result = {"success": False, "error": str(e)}
+            self.mrpackExported.emit(json.dumps(result, ensure_ascii=False))
+        threading.Thread(target=_do_export, daemon=True).start()
 
     @pyqtSlot(str, str)
     def importModpack(self, zip_path: str, version_name: str):
@@ -1908,9 +2007,12 @@ class LauncherBridge(QObject):
             try:
                 versions = modrinth_api.get_project_versions(content_id)
                 formatted = []
+                all_deps = []
                 for v in versions:
                     files = v.get("files", [])
                     primary_file = files[0] if files else {}
+                    deps = parse_dependencies(v)
+                    all_deps.extend(deps)
                     formatted.append({
                         "id": v.get("id", ""),
                         "name": v.get("name", ""),
@@ -1922,7 +2024,10 @@ class LauncherBridge(QObject):
                         "filename": primary_file.get("filename", ""),
                         "url": primary_file.get("url", ""),
                         "featured": v.get("featured", False),
+                        "dependencies": deps,
                     })
+                attach_project_info(all_deps, modrinth_api.get_projects(
+                    [d["project_id"] for d in all_deps]))
                 self.modVersions.emit(json.dumps({"content_id": content_id, "versions": formatted}))
             except Exception as e:
                 logger.error(f"获取模组版本失败: {e}", exc_info=True)
@@ -1975,10 +2080,13 @@ class LauncherBridge(QObject):
                 self.modVersions.emit(json.dumps({"content_id": content_id, "versions": []}))
         threading.Thread(target=_do_fetch, daemon=True).start()
 
-    @pyqtSlot(str, str)
-    def downloadModVersion(self, content_id: str, version_id: str):
-        """Download a specific version of a mod"""
+    @pyqtSlot(str, str, str)
+    def downloadModVersion(self, content_id: str, version_id: str,
+                           optional_deps_json: str = ""):
+        """Download a specific version of a mod, plus its checked optional deps"""
         logger.info(f"下载指定版本: {content_id}, version {version_id}")
+        chosen = parse_chosen_ids(optional_deps_json)
+
         def _do_download():
             try:
                 version = modrinth_api.get_version(version_id)
@@ -1986,17 +2094,11 @@ class LauncherBridge(QObject):
                     self.errorOccurred.emit("版本不存在")
                     return
 
-                files = version.get("files", [])
-                if not files:
+                plan = build_download_plan(
+                    version, chosen,
+                    lambda dep, parent: self._resolve_dep_version(dep, parent))
+                if not plan:
                     self.errorOccurred.emit("没有可下载文件")
-                    return
-
-                file_info = files[0]
-                download_url = file_info.get("url")
-                filename = file_info.get("filename", "download.jar")
-
-                if not download_url:
-                    self.errorOccurred.emit("下载链接无效")
                     return
 
                 minecraft_dir = Path(self.settings.get("minecraft_dir"))
@@ -2007,25 +2109,36 @@ class LauncherBridge(QObject):
                     dest_dir = minecraft_dir / "mods"
                     logger.info(f"模组保存到全局mods目录: {dest_dir} (current_mod_version='{self._current_mod_version}')")
                 dest_dir.mkdir(parents=True, exist_ok=True)
-                dest_path = dest_dir / filename
 
-                def progress_callback(progress):
-                    self.progressUpdate.emit(progress * 100, f"正在下载 {filename}...")
+                failed = []
+                for url, filename in plan:
+                    def progress_callback(progress, name=filename):
+                        self.progressUpdate.emit(progress * 100, f"正在下载 {name}...")
+                    self.gameStateChanged.emit("installing", f"正在下载 {filename}...")
+                    if modrinth_api.download_file(url, str(dest_dir / filename),
+                                                  callback=progress_callback):
+                        self.installComplete.emit(filename)
+                    else:
+                        failed.append(filename)
 
-                self.gameStateChanged.emit("installing", f"正在下载 {filename}...")
-                success = modrinth_api.download_file(download_url, str(dest_path), callback=progress_callback)
-
-                if success:
-                    self.gameStateChanged.emit("idle", "")
-                    self.installComplete.emit(filename)
-                else:
-                    self.gameStateChanged.emit("idle", "")
-                    self.errorOccurred.emit("下载失败")
+                self.gameStateChanged.emit("idle", "")
+                if failed:
+                    self.errorOccurred.emit("下载失败: " + ", ".join(failed))
             except Exception as e:
                 logger.error(f"下载失败: {e}", exc_info=True)
                 self.gameStateChanged.emit("idle", "")
                 self.errorOccurred.emit(f"下载失败: {e}")
         threading.Thread(target=_do_download, daemon=True).start()
+
+    @staticmethod
+    def _resolve_dep_version(dep: dict, parent: dict):
+        if dep["version_id"]:
+            return modrinth_api.get_version(dep["version_id"])
+        return pick_dependency_version(
+            modrinth_api.get_project_versions(dep["project_id"]),
+            game_versions=parent.get("game_versions"),
+            loaders=parent.get("loaders"),
+        )
 
     @pyqtSlot(str)
     def downloadVanillaVersion(self, version_id: str):
@@ -2038,16 +2151,15 @@ class LauncherBridge(QObject):
                 minecraft_dir = self.settings.get("minecraft_dir")
                 
                 def status_callback(status):
-                    if hasattr(status, 'get'):
-                        msg = status.get("status", "")
-                        if msg == "Downloading":
-                            filename = status.get("file", {}).get("filename", "")
-                            if filename:
-                                self.gameStateChanged.emit("installing", f"正在下载 {filename}")
-                        elif msg == "Extracting":
-                            self.gameStateChanged.emit("installing", "正在解压文件...")
-                
-                minecraft_launcher_lib.install.install_minecraft_version(
+                    msg = status if isinstance(status, str) else str(status)
+                    if msg in ("Downloading", "Download Assets",
+                               "Download Libraries", "Install java runtime"):
+                        self.gameStateChanged.emit(
+                            "installing", f"正在下载 Minecraft {version_id}...")
+                    elif "xtract" in msg:
+                        self.gameStateChanged.emit("installing", "正在解压文件...")
+
+                fast_install(
                     version_id,
                     minecraft_dir,
                     callback={"setStatus": status_callback}
@@ -2214,6 +2326,55 @@ class LauncherBridge(QObject):
             setting.set(key, parsed)
         except Exception as e:
             logger.error(f"设置版本设置失败: {e}", exc_info=True)
+
+    @pyqtSlot(str)
+    def getGameOptions(self, version_id: str):
+        logger.info(f"获取游戏设置: {version_id}")
+        def _do_load():
+            try:
+                path = options_path(self.versions, version_id)
+                parsed = read_options(path)
+                specs = list_option_specs()
+                values = {}
+                unknown = 0
+                for key, raw in parsed.items():
+                    spec = next((s for s in specs if s["key"] == key), None)
+                    if spec is None:
+                        unknown += 1
+                    else:
+                        values[key] = coerce_value(raw, spec)
+                payload = {
+                    "version_id": version_id,
+                    "path": str(path),
+                    "exists": path.exists(),
+                    "specs": specs,
+                    "values": values,
+                    "unknown_count": unknown,
+                }
+            except Exception as e:
+                logger.error(f"获取游戏设置失败: {e}", exc_info=True)
+                payload = {"version_id": version_id, "error": str(e)}
+            self.gameOptionsLoaded.emit(json.dumps(payload, ensure_ascii=False))
+        threading.Thread(target=_do_load, daemon=True).start()
+
+    @pyqtSlot(str, str)
+    def saveGameOptions(self, version_id: str, updates_json: str):
+        logger.info(f"保存游戏设置: {version_id}")
+        def _do_save():
+            try:
+                updates = json.loads(updates_json) if updates_json else {}
+                if not isinstance(updates, dict):
+                    raise ValueError("更新数据必须是对象")
+                path = options_path(self.versions, version_id)
+                merged = build_updates(read_options(path), updates)
+                write_options(path, merged)
+                result = {"success": True, "path": str(path),
+                          "updated": sorted(updates.keys())}
+            except Exception as e:
+                logger.error(f"保存游戏设置失败: {e}", exc_info=True)
+                result = {"success": False, "error": str(e)}
+            self.gameOptionsSaved.emit(json.dumps(result, ensure_ascii=False))
+        threading.Thread(target=_do_save, daemon=True).start()
 
     @pyqtSlot(str)
     def enableVersionIsolation(self, version_id: str):
@@ -2698,6 +2859,10 @@ class MainWindow(QMainWindow):
         # Initialize core components
         self.settings = Settings()
         logger.info(f"Minecraft 目录: {self.settings.get('minecraft_dir')}")
+        configure_downloads(
+            workers=self.settings.get('download_workers', 16),
+            proxy=self.settings.get('download_proxy', ''),
+        )
         
         auth = AuthManager(CLIENT_ID, REDIRECT_URL)
         versions = VersionManager(self.settings.get('minecraft_dir'))
@@ -2753,12 +2918,17 @@ class MainWindow(QMainWindow):
         self.bridge.modpackImportProgress.connect(self._on_modpack_import_progress)
         self.bridge.modpackImportComplete.connect(self._on_modpack_import_complete)
         self.bridge.modpackInfoLoaded.connect(self._on_modpack_info_loaded)
+        self.bridge.mrpackExported.connect(self._on_mrpack_exported)
+        self.bridge.gameOptionsLoaded.connect(self._on_game_options_loaded)
+        self.bridge.gameOptionsSaved.connect(self._on_game_options_saved)
         self.bridge.accountsLoaded.connect(self._on_accounts_loaded)
         self.bridge.pluginsLoaded.connect(self._on_plugins_loaded)
         self.bridge.pluginDetailLoaded.connect(self._on_plugin_detail_loaded)
         self.bridge.clientsLoaded.connect(self._on_clients_loaded)
         self.bridge.clientDownloadFinished.connect(self._on_client_download_finished)
         self.bridge.javasScanned.connect(self._on_javas_scanned)
+        self.bridge.skinsResult.connect(self._on_skins_result)
+        self.bridge.skinFileSelected.connect(self._on_skin_file_selected)
 
         # 启动加载启用中的插件 (M7: 延后到事件循环 + 兜底, 插件异常不崩启动)
         QTimer.singleShot(0, self._startup_load_plugins)
@@ -2886,6 +3056,24 @@ class MainWindow(QMainWindow):
             f"showModpackImportDialog({info_json})"
         )
 
+    def _on_mrpack_exported(self, data: str):
+        logger.info(f"mrpack 导出响应, 长度: {len(data)}")
+        self.web_view.page().runJavaScript(
+            f"onMrpackExported({data})"
+        )
+
+    def _on_game_options_loaded(self, data: str):
+        logger.info(f"游戏设置响应, 长度: {len(data)}")
+        self.web_view.page().runJavaScript(
+            f"renderGameOptions({data})"
+        )
+
+    def _on_game_options_saved(self, data: str):
+        logger.info(f"游戏设置保存响应: {data[:200]}")
+        self.web_view.page().runJavaScript(
+            f"onGameOptionsSaved({data})"
+        )
+
     def _on_accounts_loaded(self, accounts_json: str):
         """Handle account summary list -> JS renderAccountList"""
         logger.info(f"信号: accountsLoaded (长度: {len(accounts_json)})")
@@ -2924,6 +3112,17 @@ class MainWindow(QMainWindow):
     def _on_javas_scanned(self, payload: str):
         self.web_view.page().runJavaScript(
             f"onJavasScanned({json.dumps(payload)})"
+        )
+
+    def _on_skins_result(self, payload: str):
+        logger.info(f"信号: skinsResult, 长度: {len(payload)}")
+        self.web_view.page().runJavaScript(
+            f"onSkinsResult({payload})"
+        )
+
+    def _on_skin_file_selected(self, path: str):
+        self.web_view.page().runJavaScript(
+            f"onSkinFileSelected({json.dumps(path)})"
         )
 
     def _on_game_state_changed(self, state: str, extra: str):
