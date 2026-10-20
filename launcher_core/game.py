@@ -3,9 +3,11 @@ import os
 import json
 import logging
 import shutil
+import threading
+import time
 import zipfile
 import platform
-from typing import Optional
+from typing import Callable, Optional
 from pathlib import Path
 
 import minecraft_launcher_lib
@@ -13,6 +15,23 @@ import minecraft_launcher_lib
 from .fast_install import fast_install
 
 logger = logging.getLogger("DevLauncher")
+
+# 游戏真正开始渲染/建窗口时必然出现的日志标记
+_READY_MARKERS = (
+    "Setting user",
+    "Backend library",
+    "OpenAL initialized",
+    "Created:",
+)
+
+
+def _emit_progress(callback: Optional[Callable[[str, str], None]], step: str, text: str):
+    if callback is None:
+        return
+    try:
+        callback(step, text)
+    except Exception:
+        logger.debug("启动进度回调异常", exc_info=True)
 
 
 class GameLauncher:
@@ -33,10 +52,12 @@ class GameLauncher:
         jvm_args: Optional[list[str]] = None,
         min_memory: int = 1024,
         max_memory: int = 4096,
-        java_executable: Optional[str] = None
+        java_executable: Optional[str] = None,
+        on_progress: Optional[Callable[[str, str], None]] = None
     ) -> tuple[bool, str]:
         """Launch Minecraft with given parameters. Returns (success, message)."""
         logger.info(f"准备启动游戏 - 版本: {version_id}, 用户: {username}")
+        _emit_progress(on_progress, "check_version", f"检查版本 {version_id}")
         
         # 检查版本是否已安装
         installed_versions = minecraft_launcher_lib.utils.get_installed_versions(self.minecraft_dir)
@@ -45,16 +66,29 @@ class GameLauncher:
             logger.error(msg)
             return False, msg
         logger.info(f"版本 {version_id} 已安装")
+        _emit_progress(on_progress, "version_ok", f"版本 {version_id} 已安装")
         
         # 检查 Java
-        java_path = minecraft_launcher_lib.utils.get_java_executable()
+        _emit_progress(on_progress, "check_java", "检查 Java 运行环境")
+        java_source = "设置"
+        java_path = java_executable or ""
+        if java_path and not os.path.exists(java_path):
+            _emit_progress(on_progress, "java_warn", f"设置的 Java 不存在，改为自动检测: {java_path}")
+            logger.warning(f"设置的 Java 不存在: {java_path}")
+            java_path = ""
+        if not java_path:
+            java_source = "自动检测"
+            java_path = minecraft_launcher_lib.utils.get_java_executable()
         if not java_path:
             msg = "未找到 Java，请安装 Java 后重试"
             logger.error(msg)
+            _emit_progress(on_progress, "java_fail", msg)
             return False, msg
         logger.info(f"Java 路径: {java_path}")
+        _emit_progress(on_progress, "java_ok", f"Java（{java_source}）: {java_path}")
         
         # 检查版本文件是否存在
+        _emit_progress(on_progress, "check_files", "检查版本文件与依赖")
         version_path = os.path.join(self.minecraft_dir, "versions", version_id)
         jar_path = os.path.join(version_path, f"{version_id}.jar")
         json_path = os.path.join(version_path, f"{version_id}.json")
@@ -79,6 +113,8 @@ class GameLauncher:
             msg = f"版本文件不存在: {jar_path}"
             logger.error(msg)
             return False, msg
+
+        _emit_progress(on_progress, "files_ok", "版本文件检查通过")
         
         # Ensure parent version (inheritsFrom) is installed
         if inherits_from:
@@ -94,6 +130,8 @@ class GameLauncher:
                         logger.warning(f"父版本 JSON 损坏，重新下载: {parent_json}")
                         os.remove(parent_json)
                 
+                _emit_progress(on_progress, "parent_install",
+                               f"父版本 {inherits_from} 缺失，正在安装（{attempt+1}/3）")
                 logger.info(f"正在安装父版本 {inherits_from} (尝试 {attempt+1}/3)...")
                 try:
                     def _install_cb(status):
@@ -117,6 +155,8 @@ class GameLauncher:
                         logger.error(msg)
                         return False, msg
         
+        if inherits_from:
+            _emit_progress(on_progress, "parent_ok", f"父版本 {inherits_from} 已就绪")
         logger.info(f"版本文件检查通过")
         
         # Check version isolation and set gameDirectory if enabled
@@ -132,6 +172,8 @@ class GameLauncher:
         except Exception as e:
             logger.warning(f"读取版本配置失败: {e}")
 
+        _emit_progress(on_progress, "gamedir", f"游戏目录: {game_dir}")
+
         options = {
             "username": username,
             "uuid": uuid,
@@ -145,6 +187,7 @@ class GameLauncher:
         }
 
         try:
+            _emit_progress(on_progress, "build_command", "生成启动命令")
             logger.info("生成启动命令...")
             command = minecraft_launcher_lib.command.get_minecraft_command(
                 version_id,
@@ -214,11 +257,18 @@ class GameLauncher:
                             command[cp_idx + 1] = cp + ";" + parent_jar
                             logger.info(f"Added inherited jar to classpath: {parent_jar}")
 
+            _emit_progress(
+                on_progress, "command_ok",
+                f"Java: {os.path.basename(command[0])} · 内存 {min_memory}-{max_memory} MB · {len(command)} 个参数"
+            )
+
             # Extract natives for versions with inheritsFrom
             # minecraft_launcher_lib doesn't extract natives for inherited versions
             natives_dir = os.path.join(self.minecraft_dir, "versions", version_id, "natives")
             if not os.path.exists(natives_dir):
-                self._extract_natives(version_id, inherits if inherits else version_id, natives_dir)
+                _emit_progress(on_progress, "natives", "解压 natives 库")
+                extracted = self._extract_natives(version_id, inherits if inherits else version_id, natives_dir)
+                _emit_progress(on_progress, "natives_ok", f"已解压 {extracted} 个原生库文件")
 
             logger.info(f"启动命令: {' '.join(command[:5])}...")
             # Log gameDir for debugging
@@ -229,6 +279,7 @@ class GameLauncher:
             for i, arg in enumerate(command):
                 logger.debug(f"  arg[{i}]: {arg[:200]}")
             
+            _emit_progress(on_progress, "spawn", "启动游戏进程")
             logger.info("启动游戏进程...")
             # Use log file for game output so errors are captured
             log_dir = os.path.join(self.minecraft_dir, "logs")
@@ -243,6 +294,13 @@ class GameLauncher:
             )
             self._is_running = True
             logger.info(f"游戏进程已启动, PID: {self._process.pid}")
+            _emit_progress(on_progress, "spawned", f"进程已创建 · PID {self._process.pid}")
+            _emit_progress(on_progress, "waiting", "等待游戏窗口（正在读取启动日志）")
+            threading.Thread(
+                target=self._tail_game_log,
+                args=(game_log_path, on_progress),
+                daemon=True,
+            ).start()
             return True, "游戏已启动"
         except FileNotFoundError as e:
             msg = f"找不到 Java 或 Minecraft 文件: {e}"
@@ -257,7 +315,7 @@ class GameLauncher:
             logger.error(msg, exc_info=True)
             return False, msg
 
-    def _extract_natives(self, version_id: str, source_version_id: str, natives_dir: str):
+    def _extract_natives(self, version_id: str, source_version_id: str, natives_dir: str) -> int:
         """Extract native libraries to the natives directory"""
         os_name = "windows" if platform.system() == "Windows" else "linux" if platform.system() == "Linux" else "osx"
         logger.info(f"提取原生库: {source_version_id} -> {natives_dir}")
@@ -311,6 +369,37 @@ class GameLauncher:
                     logger.warning(f"Failed to extract natives from {jar_path}: {e}")
 
         logger.info(f"提取了 {extracted} 个原生库文件")
+        return extracted
+
+    def _tail_game_log(self, log_path: str, on_progress, timeout: float = 25.0, max_lines: int = 80):
+        if on_progress is None:
+            return
+        deadline = time.time() + timeout
+        sent = 0
+        ready = False
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+                while time.time() < deadline and sent < max_lines:
+                    if self._process is not None and self._process.poll() is not None:
+                        _emit_progress(on_progress, "exit",
+                                       f"游戏进程已退出（退出码 {self._process.returncode}）")
+                        return
+                    line = fh.readline()
+                    if not line:
+                        time.sleep(0.2)
+                        continue
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if len(line) > 300:
+                        line = line[:300] + "…"
+                    _emit_progress(on_progress, "log", line)
+                    sent += 1
+                    if not ready and any(marker in line for marker in _READY_MARKERS):
+                        ready = True
+                        _emit_progress(on_progress, "ready", "游戏窗口已就绪")
+        except Exception:
+            logger.debug("读取游戏启动日志失败", exc_info=True)
 
     def is_running(self) -> bool:
         """Check if game is still running"""

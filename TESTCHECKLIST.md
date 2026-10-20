@@ -475,3 +475,20 @@
 - [ ] `node tests/test_account_skin_tab.js` 64 PASS / 0 FAIL（2026-10-18 §43 追加 21 条）
 - [ ] 全量门禁：`python -m pytest tests -q`（385 passed）+ 17 个 node 测试（1040 断言）+ `py_compile`（62 文件）+ `node --check` 全绿
 - [ ] `python tools/i18n/collect.py` 与 `build.py` 重跑后 `strings.json` / `ui/i18n_dict.js` 无变化
+
+## 44 启动详细过程面板
+
+- [ ] 点「启动游戏」后，启动按钮上方出现「启动详情」面板，按时间顺序列出：检查版本 → 版本已安装 → 检查 Java → Java 路径 → 检查版本文件 → 游戏目录 → 生成启动命令 → Java/内存/参数个数 → 解压 natives → 启动进程 → PID → 等待窗口
+- [ ] 面板每行带 `HH:MM:SS` 时间戳；成功项、就绪项、错误项分别有不同颜色
+- [ ] 游戏进程启动后，面板继续滚动显示 `logs/game.log` 的前几行（如 `Setting user` / `Backend library` / `OpenAL initialized`），出现「游戏窗口已就绪」后停止
+- [ ] 无 Java / 版本未安装 / 未登录时，失败原因在面板中以红色行显示，按钮同时进入错误态
+- [ ] 设置里指定的 Java 路径不存在时，自动回退系统探测，并在面板中提示「设置的 Java 不存在，改为自动检测」
+- [ ] 设置里指定的 Java 有效时，直接使用该路径（面板标注「设置」），不再因 mll 自动探测失败而拒绝启动
+- [ ] 「收起 / 展开」可折叠日志；再次启动时面板清空并重新计时
+- [ ] 安装版本 / 整合包开始时，上一轮的启动详情自动隐藏
+- [ ] 游戏提前退出时，面板显示退出码；不影响下次启动
+- [ ] 长行（长路径、模组列表）正常换行，不撑破侧栏；超过 200 行自动丢弃最旧行
+- [ ] `python -m pytest tests/test_game_launch_progress.py -q` 10 passed
+- [ ] `node tests/test_launch_detail.js` 38 PASS / 0 FAIL
+- [ ] 全量门禁：`python -m pytest tests -q`（395 passed）+ 18 个 node 测试（1078 断言）+ `py_compile`（63 文件）+ `node --check` 全绿
+- [ ] 英文模式下面板标题显示 `Launch details`；`collect.py` + `build.py` 可重复生成同一份 `ui/i18n_dict.js`

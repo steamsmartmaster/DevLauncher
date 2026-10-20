@@ -1023,6 +1023,38 @@
             border-radius: 2px;
         }
 
+        .launch-detail-log {
+            font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+            font-size: 11px;
+            line-height: 1.5;
+            max-height: 180px;
+        }
+
+        .launch-detail-line {
+            display: flex;
+            gap: 8px;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .launch-detail-line.is-ok {
+            color: var(--text-primary);
+        }
+
+        .launch-detail-line.is-ready {
+            color: #4caf50;
+        }
+
+        .launch-detail-line.is-error {
+            color: #ef5350;
+        }
+
+        .launch-detail-time {
+            flex: none;
+            opacity: 0.55;
+        }
+
         .download-file-item {
             display: flex;
             align-items: center;
@@ -3532,6 +3564,13 @@
                         <div class="progress-fill" id="progressFill"></div>
                     </div>
                     <div class="download-file-list" id="downloadFileList"></div>
+                </div>
+                <div class="download-progress-panel" id="launchDetailPanel" style="display:none;">
+                    <div class="download-progress-header">
+                        <span class="download-progress-title">启动详情</span>
+                        <button class="settings-file-btn" id="launchDetailToggle" onclick="toggleLaunchDetail()" style="font-size:11px;padding:3px 8px;margin-left:8px;flex:none;">收起</button>
+                    </div>
+                    <div class="download-file-list launch-detail-log" id="launchDetailLog"></div>
                 </div>
                 <button class="launch-btn" id="launchBtn" onclick="launchGame()" disabled>
                     <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -6911,6 +6950,7 @@
             
             // Reset onclick handler back to default
             document.getElementById('launchBtn').onclick = function() { launchGame(); };
+            launchDetailClear();
             
             console.log('[JS] launchGame:', selectedVersion);
             if (pythonInterface && pythonInterface.launchGame) {
@@ -6957,11 +6997,58 @@
             refreshModLoaders();
         }
 
+        function launchDetailClear() {
+            var log = document.getElementById('launchDetailLog');
+            var panel = document.getElementById('launchDetailPanel');
+            if (!log || !panel) return;
+            log.innerHTML = '';
+            panel.style.display = 'none';
+            var toggle = document.getElementById('launchDetailToggle');
+            if (toggle) toggle.textContent = '收起';
+        }
+
+        function appendLaunchDetail(step, text) {
+            var log = document.getElementById('launchDetailLog');
+            var panel = document.getElementById('launchDetailPanel');
+            if (!log || !panel) return;
+            panel.style.display = 'block';
+            var now = new Date();
+            var row = document.createElement('div');
+            row.className = 'launch-detail-line';
+            if (step === 'ready') row.className += ' is-ready';
+            else if (step === 'error' || step === 'java_fail' || step === 'exit') row.className += ' is-error';
+            else if (step === 'version_ok' || step === 'java_ok' || step === 'files_ok' ||
+                     step === 'command_ok' || step === 'spawned') row.className += ' is-ok';
+            var time = document.createElement('span');
+            time.className = 'launch-detail-time';
+            time.textContent = now.toTimeString().slice(0, 8);
+            var body = document.createElement('span');
+            body.className = 'launch-detail-text';
+            body.textContent = (text === null || text === undefined) ? '' : String(text);
+            row.appendChild(time);
+            row.appendChild(body);
+            log.appendChild(row);
+            while (log.childNodes.length > 200) {
+                log.removeChild(log.firstChild);
+            }
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function toggleLaunchDetail() {
+            var log = document.getElementById('launchDetailLog');
+            var toggle = document.getElementById('launchDetailToggle');
+            if (!log) return;
+            var hidden = log.style.display === 'none';
+            log.style.display = hidden ? 'block' : 'none';
+            if (toggle) toggle.textContent = hidden ? '收起' : '展开';
+        }
+
         function updateLaunchButton(state, extra) {
             var btn = document.getElementById('launchBtn');
             var svg = btn.querySelector('svg');
             var span = btn.querySelector('span');
             var panel = document.getElementById('downloadProgressPanel');
+            var detailPanel = document.getElementById('launchDetailPanel');
             
             // Remove all state classes
             btn.classList.remove('state-installing', 'state-launching', 'state-running', 'state-error');
@@ -6987,6 +7074,7 @@
                     btn.classList.add('state-installing');
                     svg.innerHTML = spinnerIcon;
                     btn.setAttribute('disabled', 'disabled');
+                    if (detailPanel) detailPanel.style.display = 'none';
                     // Parse detailed progress if JSON
                     try {
                         var detail = JSON.parse(extra);

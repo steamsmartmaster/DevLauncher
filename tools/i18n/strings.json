@@ -302,13 +302,6 @@
   ]
  },
  {
-  "key": "21d872ee",
-  "zh": "<svg class=\"icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"white\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"width:14px;height:14px;\"><rect x=\"2\" y=\"2\" width=\"9\" height=\"9\"/><rect x=\"13\" y=\"2\" width=\"9\" height=\"9\"/><rect x=\"2\" y=\"13\" width=\"9\" height=\"9\"/><rect x=\"13\" y=\"13\" width=\"9\" height=\"9\"/></svg> Microsoft 登录",
-  "kinds": [
-   "js_sq"
-  ]
- },
- {
   "key": "22eff2bd",
   "zh": "下载代理",
   "kinds": [
@@ -927,7 +920,8 @@
   "key": "5d581564",
   "zh": "收起",
   "kinds": [
-   "html_text"
+   "html_text",
+   "js_sq"
   ]
  },
  {
@@ -1567,6 +1561,13 @@
   ]
  },
  {
+  "key": "a3895f43",
+  "zh": "启动详情",
+  "kinds": [
+   "html_text"
+  ]
+ },
+ {
   "key": "a4a3478b",
   "zh": "渐变起始色",
   "kinds": [
@@ -1669,7 +1670,8 @@
   "key": "b0e24833",
   "zh": "展开",
   "kinds": [
-   "html_text"
+   "html_text",
+   "js_sq"
   ]
  },
  {
@@ -1790,6 +1792,13 @@
  {
   "key": "bbf5d6f9",
   "zh": "列表...</div>",
+  "kinds": [
+   "js_sq"
+  ]
+ },
+ {
+  "key": "bcaf7d76",
+  "zh": "<svg class=\"icon\" viewBox=\"0 0 24 24\" style=\"width:14px;height:14px;\"><rect x=\"2\" y=\"2\" width=\"9\" height=\"9\" fill=\"#F25022\"/><rect x=\"13\" y=\"2\" width=\"9\" height=\"9\" fill=\"#7FBA00\"/><rect x=\"2\" y=\"13\" width=\"9\" height=\"9\" fill=\"#00A4EF\"/><rect x=\"13\" y=\"13\" width=\"9\" height=\"9\" fill=\"#FFB900\"/></svg> Microsoft 登录",
   "kinds": [
    "js_sq"
   ]

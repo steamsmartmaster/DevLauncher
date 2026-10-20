@@ -153,6 +153,7 @@ class LauncherBridge(QObject):
     applyBackground = pyqtSignal(str)
     searchResults = pyqtSignal(str)
     gameStateChanged = pyqtSignal(str, str)  # (state, extra_text)
+    launchDetail = pyqtSignal(str, str)  # (step, text) 启动过程细节
     gameStarted = pyqtSignal()  # emitted after game process starts, to start monitor on main thread
     modLoaderVersions = pyqtSignal(str)  # JSON list of mod loader versions
     installedLoaders = pyqtSignal(str)  # JSON list of installed loaders for a version
@@ -608,11 +609,13 @@ class LauncherBridge(QObject):
                 login_data = self.auth.get_login_data()
                 if not login_data:
                     logger.warning("用户未登录")
+                    self.launchDetail.emit("error", "请先登录")
                     self.gameStateChanged.emit("error", "请先登录")
                     self.errorOccurred.emit("请先登录")
                     return
                 
                 self.gameStateChanged.emit("launching", f"正在启动 {version_id}...")
+                self.launchDetail.emit("start", f"开始启动版本 {version_id}")
                 
                 logger.info(f"准备启动 - 用户: {login_data['name']}, 版本: {version_id}")
                 success, message = self.game.launch(
@@ -622,7 +625,8 @@ class LauncherBridge(QObject):
                     login_data['access_token'],
                     max_memory=self.settings.get('max_memory'),
                     min_memory=self.settings.get('min_memory'),
-                    java_executable=(self.settings.get('java_path') or '')
+                    java_executable=(self.settings.get('java_path') or ''),
+                    on_progress=self.launchDetail.emit
                 )
                 
                 if success:
@@ -632,10 +636,12 @@ class LauncherBridge(QObject):
                     self.gameStarted.emit()  # start monitor on main thread
                 else:
                     logger.error(f"游戏启动失败: {message}")
+                    self.launchDetail.emit("error", message)
                     self.gameStateChanged.emit("error", message)
                     self.errorOccurred.emit(message)
             except Exception as e:
                 logger.error(f"启动游戏异常: {e}", exc_info=True)
+                self.launchDetail.emit("error", str(e))
                 self.gameStateChanged.emit("error", str(e))
                 self.errorOccurred.emit(str(e))
         
@@ -2911,6 +2917,7 @@ class MainWindow(QMainWindow):
         self.bridge.applyBackground.connect(self._on_apply_background)
         self.bridge.searchResults.connect(self._on_search_results)
         self.bridge.gameStateChanged.connect(self._on_game_state_changed)
+        self.bridge.launchDetail.connect(self._on_launch_detail)
         self.bridge.gameStarted.connect(self.bridge._start_game_monitor)
         self.bridge.modLoaderVersions.connect(self._on_mod_loader_versions)
         self.bridge.installedLoaders.connect(self._on_installed_loaders)
@@ -3131,6 +3138,11 @@ class MainWindow(QMainWindow):
         safe_extra = extra.replace("'", "\\'")
         self.web_view.page().runJavaScript(
             f"updateLaunchButton('{state}', '{safe_extra}')"
+        )
+
+    def _on_launch_detail(self, step: str, text: str):
+        self.web_view.page().runJavaScript(
+            f"appendLaunchDetail({json.dumps(step)}, {json.dumps(text, ensure_ascii=False)})"
         )
 
     def _on_mod_loader_versions(self, data: str):

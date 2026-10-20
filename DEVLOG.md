@@ -641,3 +641,26 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 **视觉验证**（Edge headless 渲染真实 CSS + markup + **真实 `renderSkinsProfile`/`renderCapeList` 源码**，喂合成 64x32 披风纹理）：Case A（1 ACTIVE + 1 非 ACTIVE）披风卡片左侧显示披风预览图；Case B（空列表）预览隐藏、卡片内显示 `暂无披风`；两 Case 中 variant 下拉均为深色主题、文字清晰、与相邻「更换皮肤 / 刷新」同风格；Microsoft 登录按钮为四色品牌图标。
 
 **门禁**：pytest **385 passed**；17 个 node 测试文件共 **1040 断言 0 失败**（旧基线 1019 + 21）；`py_compile` 62 文件 rc=0；`node --check` 内联 1 block + `ui/i18n.js`/`ui/i18n_dict.js` rc=0。`tools/i18n` 两个产物字节级不变（`ui/i18n_dict.js` sha1 `6F93E5B0…`、`tools/i18n/strings.json` sha1 `5EEE7CCC…`）—— 未改动任何用户可见文本，仅新增控件与图标。
+
+### 启动详细过程面板 + 早期日志（2026-10-18）
+
+**需求**（用户报障）：点「启动游戏」后几乎瞬间就变成「游戏运行中」，看不到启动器做了什么，要求显示启动过程的详细细节。
+
+**根因**：`GameLauncher.launch()` 在 `Popen` 返回后立即 `return True, "游戏已启动"`，`main.py` 随即 emit `("running", "游戏运行中")`；整条链路只有 `launching` / `running` 两个状态，中间的版本校验、Java 探测、父版本安装、参数拼装、natives 解压全部静默。游戏 stdout 虽被重定向到 `<游戏目录>/logs/game.log`，但从未有代码读取它。
+
+**改动**：
+- `launcher_core/game.py`：`launch()` 新增 `on_progress(step, text)` 回调（默认 `None`，旧调用零影响），在 14 个阶段上报：`check_version` / `version_ok` / `check_java` / `java_ok` / `check_files` / `files_ok` / `gamedir` / `build_command` / `command_ok`（含 Java 名、内存区间、参数个数）/ `natives` / `natives_ok`（含解压个数）/ `spawn` / `spawned`（含 PID）/ `waiting`；父版本补装另有 `parent_install` / `parent_ok`，失败路径有 `java_fail`
+- `_emit_progress()` 吞掉回调异常：UI 断链绝不影响启动
+- Java 探测修正：`java_executable` 存在即用（标注「设置」）；设置路径不存在时记 `java_warn` 并回退自动探测；两者都没有才 `java_fail`。此前即使玩家手动指定 Java，只要 mll 自动探测失败就拒绝启动
+- 新增 `_tail_game_log()` 守护线程：从 `logs/game.log` 逐行读取最多 25 秒 / 80 行（单行截断 300 字），命中 `Setting user` / `Backend library` / `OpenAL initialized` / `Created:` 任一标记即上报 `ready`；进程提前退出则上报 `exit`（带退出码）
+- `main.py`：新增 `launchDetail = pyqtSignal(str, str)`；`launchGame()` 把 `self.launchDetail.emit` 作为 `on_progress` 传入，未登录 / 失败 / 异常各补一条 `error`；`_on_launch_detail` 用 `json.dumps` 安全注入 `appendLaunchDetail(step, text)`
+- `ui/index.html`：启动区新增 `#launchDetailPanel`（`#launchDetailLog` 复用 `.download-file-list` 滚动样式 + 等宽字体），`appendLaunchDetail()` 用 `textContent` 造行、带 `HH:MM:SS`、按步骤着色（成功 / 就绪 / 错误）、上限 200 行、自动滚底；`toggleLaunchDetail()` 折叠展开；`launchGame()` 开新局先 `launchDetailClear()`；`updateLaunchButton('installing')` 隐藏旧详情
+- i18n：新增静态文案「启动详情」→ `Launch details`；`collect.py` 同时补收了 §43 改为四色后的 Microsoft 图标字符串（此前未重跑收集器），`build.py` 产物随之更新
+
+**红绿**：
+- `tests/test_game_launch_progress.py`（新）**10 断言**：14 阶段顺序与文案、PID、内存、日志文件落盘、无回调兼容、设置 Java 直用、设置路径失效回退、无 Java 失败、版本缺失提前失败、日志行 / 就绪 / 提前退出、natives 计数、main/UI 接线
+- `tests/test_launch_detail.js`（新）**38 断言**：面板位置（启动区、按钮上方）、追加 / 时间戳 / 自动滚动、`textContent` 不解析 HTML、步骤配色、200 行上限、清空与折叠、启动清空 / 安装隐藏
+
+**视觉验证**（Edge headless）：① 独立包装页用真实 CSS 渲染 12 行（含长 Java 路径与 25 个模组的超长行）—— 换行正常、时间戳弱化、就绪行为绿色；② 真实 `ui/index.html` 注入真实 `appendLaunchDetail` 调用后截图 —— 面板出现在启动按钮正上方，滚动到底部显示最新日志，无布局破坏。
+
+**门禁**：pytest **395 passed**（旧 385 + 10）；18 个 node 测试文件共 **1078 断言 0 失败**（旧 1040 + 38）；`py_compile` 63 文件 rc=0；`node --check` 内联 1 block + `ui/i18n.js`/`ui/i18n_dict.js` rc=0。i18n 按预期变更：`strings.json` 347→348 键、`ui/i18n_dict.js` 重建（新增「启动详情」，并补收 §43 的四色图标字符串）。
