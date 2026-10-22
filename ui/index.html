@@ -2451,8 +2451,10 @@
             border-radius: 8px;
             margin-bottom: 4px;
             border: 1px solid var(--border-color);
-            transition: all 0.2s;
+            transition: background 0.2s, border-color 0.2s;
             gap: 12px;
+            content-visibility: auto;
+            contain-intrinsic-size: auto 62px;
         }
 
         .mod-item:hover {
@@ -2460,6 +2462,15 @@
         }
 
         .mod-item.mod-disabled {
+            opacity: 0.5;
+        }
+
+        .mod-item.mod-pending .mod-name {
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .mod-item.mod-pending .mod-icon svg {
             opacity: 0.5;
         }
 
@@ -4421,84 +4432,168 @@
             }
         }
 
+        var MOD_FIRST_BATCH = 15;
+        var MOD_UPGRADE_BUDGET_MS = 8;
+
+        function modDisplayName(filename) {
+            var name = String(filename || '');
+            if (name.slice(-9) === '.disabled') name = name.slice(0, -9);
+            if (name.slice(-4) === '.jar') name = name.slice(0, -4);
+            return name;
+        }
+
+        function modPlaceholderIconHtml() {
+            return '<div class="mod-icon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>';
+        }
+
+        function modIconHtml(mod, pending) {
+            if (pending || !mod.icon) return modPlaceholderIconHtml();
+            var iconHtml;
+            if (mod.icon) {
+                iconHtml = '<div class="mod-icon"><img src="' + mod.icon + '" alt="" onerror="this.parentElement.innerHTML=\'<svg viewBox=\\\'0 0 24 24\\\'><path d=\\\'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\\\'/></svg>\'"/></div>';
+            } else {
+                iconHtml = '<div class="mod-icon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>';
+            }
+            
+            return iconHtml;
+        }
+
+        function modInnerHtml(mod, pending) {
+            var filename = String(mod.filename || '');
+            var enabled = mod.enabled !== false;
+            var displayName = pending ? modDisplayName(filename) : (mod.name || modDisplayName(filename));
+            var checkbox = '<div class="mod-checkbox ' + (enabled ? 'checked' : '') + '" onclick="toggleMod(\'' + filename + '\', ' + !enabled + ')">' +
+                '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>';
+            var badge = '';
+            if (!pending) {
+                if (mod.version) {
+                    badge = '<span class="mod-version-badge version-match">' + escapeHtml(mod.version) + '</span>';
+                } else {
+                    var verMatch = filename.match(/[\d]+\.[\d]+[\.\d]*/);
+                    if (verMatch) {
+                        badge = '<span class="mod-version-badge version-unknown">' + verMatch[0] + '</span>';
+                    }
+                }
+            }
+            var metaLine;
+            if (!pending && mod.mod_id) {
+                metaLine = '<span class="mod-id">' + escapeHtml(mod.mod_id) + '</span>';
+                metaLine += ' <span class="mod-filename">| ' + escapeHtml(filename) + '</span>';
+            } else {
+                metaLine = '<span class="mod-filename">' + escapeHtml(filename) + '</span>';
+            }
+            return checkbox + modIconHtml(mod, pending) +
+                '<div class="mod-info">' +
+                '<div class="mod-name-row">' +
+                '<div class="mod-name">' + escapeHtml(displayName) + '</div>' +
+                badge +
+                '</div>' +
+                '<div class="mod-meta">' + metaLine + '</div>' +
+                '</div>' +
+                '<div class="mod-actions">' + modActionsHtml(filename, enabled) + '</div>';
+        }
+
+        function modItemHtml(mod, pending) {
+            var cls = 'mod-item' + (mod.enabled === false ? ' mod-disabled' : '') + (pending ? ' mod-pending' : '');
+            return '<div class="' + cls + '" data-filename="' + escapeHtml(String(mod.filename || '')) + '">' +
+                modInnerHtml(mod, pending) + '</div>';
+        }
+
+        function modSameList(list, mods) {
+            var n = list.children.length;
+            if (n !== mods.length || n === 0) return false;
+            var first = list.children[0];
+            var last = list.children[n - 1];
+            if (!first.getAttribute || !last.getAttribute) return false;
+            return first.getAttribute('data-filename') === String(mods[0].filename || '') &&
+                last.getAttribute('data-filename') === String(mods[n - 1].filename || '');
+        }
+
+        function upgradeModRow(node, mod) {
+            node.innerHTML = modInnerHtml(mod, false);
+            var cls = node.className || '';
+            if (cls.indexOf('mod-pending') >= 0) {
+                node.className = cls.replace(/\s*mod-pending\b/g, '');
+            }
+        }
+
+        function upgradeModRows(list, mods, start, gen) {
+            var idx = start;
+            function frame() {
+                if (gen !== modRenderGen) return;
+                var deadline = performance.now() + MOD_UPGRADE_BUDGET_MS;
+                var nodes = list.children;
+                while (idx < mods.length && performance.now() < deadline) {
+                    var node = nodes[idx];
+                    if (node) upgradeModRow(node, mods[idx]);
+                    idx++;
+                }
+                if (idx < mods.length) requestAnimationFrame(frame);
+            }
+            requestAnimationFrame(frame);
+        }
+
         function renderModList(mods, listId) {
             var list = document.getElementById(listId);
             if (!list) return;
             if (!mods || mods.length === 0) {
                 var isModpack = selectedVersion && (selectedVersion.includes('Optimized') || selectedVersion.includes('modpack'));
-                var downloadBtn = isModpack ? '<div style="margin-top: 16px;"><button class="download-btn" onclick="redownloadModpackMods()" style="padding: 10px 24px;">下载整合包模组</button></div>' : '';
-                list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px;"><div>暂无已安装模组</div><div style="font-size: 13px; margin-top: 8px;">' + (isModpack ? '整合包模组未下载，点击下方按钮下载' : '将 .jar 文件放入 mods 文件夹') + '</div>' + downloadBtn + '</div>';
+                var downloadBtn = isModpack ? '<div style="margin-top: 16px;"><button class="download-btn" onclick="redownloadModpackMods()" style="padding: 10px 24px;">重新下载整合包模组</button></div>' : '';
+                list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px;"><div>尚未安装模组</div><div style="font-size: 13px; margin-top: 8px;">' + (isModpack ? '整合包模组未下载，点击下方按钮下载' : '将 .jar 文件放入 mods 文件夹') + '</div>' + downloadBtn + '</div>';
                 return;
             }
-            
-            var prevScroll = list.scrollTop;
-            var items = [];
-            var gen = ++modRenderGen;
-            mods.forEach(function(mod) {
-                var item = document.createElement('div');
-                item.className = 'mod-item' + (mod.enabled ? '' : ' mod-disabled');
-                item.setAttribute('data-filename', mod.filename);
-                
-                // Checkbox
-                var checkbox = '<div class="mod-checkbox ' + (mod.enabled ? 'checked' : '') + '" onclick="toggleMod(\'' + mod.filename + '\', ' + !mod.enabled + ')">' +
-                    '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>';
-                
-                // Icon
-                var iconHtml;
-                if (mod.icon) {
-                    iconHtml = '<div class="mod-icon"><img src="' + mod.icon + '" alt="" onerror="this.parentElement.innerHTML=\'<svg viewBox=\\\'0 0 24 24\\\'><path d=\\\'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z\\\'/></svg>\'"/></div>';
-                } else {
-                    iconHtml = '<div class="mod-icon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg></div>';
-                }
-                
-                // Version badge
-                var versionBadge = '';
-                if (mod.version) {
-                    versionBadge = '<span class="mod-version-badge version-match">' + escapeHtml(mod.version) + '</span>';
-                } else {
-                    // Try to extract version from filename
-                    var verMatch = mod.filename.match(/[\d]+\.[\d]+[\.\d]*/);
-                    if (verMatch) {
-                        versionBadge = '<span class="mod-version-badge version-unknown">' + verMatch[0] + '</span>';
-                    }
-                }
-                
-                // Mod ID and filename
-                var metaLine = '';
-                if (mod.mod_id) {
-                    metaLine = '<span class="mod-id">' + escapeHtml(mod.mod_id) + '</span>';
-                    metaLine += ' <span class="mod-filename">| ' + escapeHtml(mod.filename) + '</span>';
-                } else {
-                    metaLine = '<span class="mod-filename">' + escapeHtml(mod.filename) + '</span>';
-                }
-                
-                item.innerHTML = checkbox + iconHtml +
-                    '<div class="mod-info">' +
-                    '<div class="mod-name-row">' +
-                    '<div class="mod-name">' + escapeHtml(mod.name) + '</div>' +
-                    versionBadge +
-                    '</div>' +
-                    '<div class="mod-meta">' + metaLine + '</div>' +
-                    '</div>' +
-                    '<div class="mod-actions">' + modActionsHtml(mod.filename, mod.enabled) + '</div>';
 
-                items.push(item);
-            });
-            list.innerHTML = '';
-            // Batched append so a 300-mod pack does not freeze the UI;
-            // previous scroll restored after the final batch.
-            var idx = 0;
-            function appendBatch() {
-                if (gen !== modRenderGen) return;  // superseded by a newer render
-                var end = Math.min(idx + 30, items.length);
-                for (; idx < end; idx++) list.appendChild(items[idx]);
-                if (idx < items.length) {
-                    requestAnimationFrame(appendBatch);
-                } else {
-                    list.scrollTop = prevScroll;
+            var gen = ++modRenderGen;
+            var prevScroll = list.scrollTop;
+
+            // 索引骨架已按同一顺序铺好：不再重建 DOM，只逐帧替换内容。
+            if (modSameList(list, mods)) {
+                list.scrollTop = prevScroll;
+                var firstNode = list.children[0];
+                if (firstNode && (firstNode.className || '').indexOf('mod-pending') < 0) {
+                    return;  // 上次已升级完，重复进入页面不再做任何 DOM 工作
                 }
+                upgradeModRows(list, mods, 0, gen);
+                return;
             }
-            appendBatch();
+
+            var head = mods.slice(0, MOD_FIRST_BATCH);
+            var rest = mods.slice(MOD_FIRST_BATCH);
+            var i;
+            var headHtml = '';
+            for (i = 0; i < head.length; i++) headHtml += modItemHtml(head[i], false);
+            list.innerHTML = headHtml;
+            list.scrollTop = prevScroll;
+            if (!rest.length) return;
+
+            var appended = 0;
+            function frame() {
+                if (gen !== modRenderGen) return;
+                var deadline = performance.now() + MOD_UPGRADE_BUDGET_MS;
+                if (appended < rest.length) {
+                    var buf = '';
+                    while (appended < rest.length && performance.now() < deadline) {
+                        buf += modItemHtml(rest[appended], true);
+                        appended++;
+                    }
+                    if (buf) list.insertAdjacentHTML('beforeend', buf);
+                    requestAnimationFrame(frame);
+                    return;
+                }
+                upgradeModRows(list, mods, MOD_FIRST_BATCH, gen);
+            }
+            requestAnimationFrame(frame);
+        }
+
+        function updateModIndex(index) {
+            if (currentPage !== 'mods' && currentPage !== 'versionMods') return;
+            var listId = currentPage === 'versionMods' ? 'versionModsList' : 'modsList';
+            var list = document.getElementById(listId);
+            if (!list || !index || !index.length) return;
+            ++modRenderGen;
+            var html = '';
+            for (var i = 0; i < index.length; i++) html += modItemHtml(index[i], true);
+            list.innerHTML = html;
         }
 
         var lastMods = [];

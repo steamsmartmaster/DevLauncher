@@ -664,3 +664,96 @@ D_ logo 的 D 和 _ 符号在 48x48 尺寸下挤在一起。
 **视觉验证**（Edge headless）：① 独立包装页用真实 CSS 渲染 12 行（含长 Java 路径与 25 个模组的超长行）—— 换行正常、时间戳弱化、就绪行为绿色；② 真实 `ui/index.html` 注入真实 `appendLaunchDetail` 调用后截图 —— 面板出现在启动按钮正上方，滚动到底部显示最新日志，无布局破坏。
 
 **门禁**：pytest **395 passed**（旧 385 + 10）；18 个 node 测试文件共 **1078 断言 0 失败**（旧 1040 + 38）；`py_compile` 63 文件 rc=0；`node --check` 内联 1 block + `ui/i18n.js`/`ui/i18n_dict.js` rc=0。i18n 按预期变更：`strings.json` 347→348 键、`ui/i18n_dict.js` 重建（新增「启动详情」，并补收 §43 的四色图标字符串）。
+
+### 启动提速：onedir 打包 + 原生启动画面（2026-10-20）
+
+**现象**：双击 `dist\DevLauncher.exe` 后约 8 秒窗口才出现，期间桌面没有任何反馈。
+
+**实测定位**（`dist\logs\launcher.log` 首行时间戳 vs 进程创建时间）：
+
+| run | 到主窗口 | 进程创建 → 首行日志 |
+| --- | --- | --- |
+| 1 | 9470 ms | 8092 ms |
+| 2 | 7966 ms | 7084 ms |
+| 3 | 8587 ms | 7829 ms |
+
+即 85%~95% 的时间花在应用自身首行日志之前——PyInstaller onefile 每次启动都要把约 207MB 解包到 `%TEMP%\_MEI*`，与 MainWindow、QtWebEngine 初始化无关。只加启动画面覆盖不到这段空白。
+
+**改动**：
+- `build_exe.ps1`：`--onefile` → `--onedir`，入口 `main.py` → `boot.py`；发布 zip 改为整个 `dist\DevLauncher\` 目录（含 `_internal`），解压后运行 `DevLauncher\DevLauncher.exe`；冒烟路径同步；`--clean` 保持
+- `boot.py`（新）：先设置 `AA_ShareOpenGLContexts`（QtWebEngine 要求，否则必须在 QApplication 之前 import QtWebEngineWidgets，启动画面就来不及显示），再创建 QApplication 与启动画面，最后 `import main`；失败时把 traceback 写入 `logs/launcher.log`（windowed 无控制台）
+- `launcher_core/splash.py`（新）：460×172 无边框卡片（12px 圆角、代码绘制图标、状态文本、不定进度条、半透明背景），只依赖 QtCore/QtGui/QtWidgets；`set_status()` 立即 `processEvents`，`finish()` 幂等
+- `main.py`：`main(app=None, splash=None)` 支持注入已创建的 QApplication；三处状态文本（加载运行库 / 初始化账户与版本 / 加载界面）；`web_view.loadFinished` 关闭启动画面，另有 6s 兜底
+- `pytest.ini`（新）：`testpaths = tests` + `norecursedirs` 排除 `dist`。onedir 后 `dist\DevLauncher\_internal` 是一整套 Python 环境，根目录裸跑 pytest 会递归进去并导致进程崩溃（0xC0000409）
+
+**实测（同机各 3 次）**：启动画面 **0.76~0.91s**；主窗口 **1.28~1.68s**（改前 7.97~9.47s），约 5~6 倍；冷启动（首次解压后）约 2.6s。
+
+**代价**：发布形态由单文件变为文件夹（`DevLauncher.exe` + `_internal\`），这是省掉每次解包的必然结果；用户解压后路径为 `DevLauncher\DevLauncher.exe`。
+
+**回归**：pytest **400 passed**（+5 `tests/test_startup_splash.py`）；node 18 文件 **1078 断言 0 失败**；`py_compile` 66 文件；`node --check` 通过。`tests/test_build_assets.py` 断言改为 `--onedir` + `boot.py`，版本资源 1.2.1.0。
+### 模组列表渐进渲染：首屏 15 条 + 文件名骨架（2026-10-20）
+
+**问题**：模组页一次性构建并插入全部卡片。300+ 模组时，用户点开模组页要先等 jar 扫描（冷缓存顺序读取 300 个 jar 约 4s，8 线程约 180ms）再等整表插入，期间界面无任何反馈。
+
+**改动**：
+- `main.py`：`LauncherBridge` 新增 `modsIndex` 信号。`loadMods` 在收集完 jar 列表后、读取任何元数据之前先 emit 一份 `[{filename, enabled}]` 轻量索引；完整列表仍走 `modsLoaded`，前端无需改协议。`_on_mods_index` 注入 `updateModIndex(...)`。
+- `ui/index.html`：`renderModList` 改为三段式——
+  1. 同步只构建并插入前 `MOD_FIRST_BATCH = 15` 条完整卡片（真实名称、图标、版本号）；
+  2. 后续每帧用 `insertAdjacentHTML` 追加一批骨架行（文件名当名称、灰色占位图标、`mod-pending`），单帧预算 `MOD_UPGRADE_BUDGET_MS = 8`；
+  3. 追加完毕后再按同一预算逐帧把骨架行 `innerHTML` 换成完整内容，代次计数 `modRenderGen` 保证重渲染时旧帧立即失效。
+- 抽出 `modDisplayName` / `modPlaceholderIconHtml` / `modIconHtml(mod, pending)` / `modInnerHtml` / `modItemHtml`，骨架与完整卡片共用同一套 markup，避免两份模板漂移；`.mod-pending` 仅降低名称与图标的不透明度。
+
+**实测**（Playwright + msedge，真实布局与 rAF，300 个模组 @8KB 图标，3 次取中位）：
+- 首屏 15 条：**6.3ms**（旧实现 6.7ms，且旧实现必须先构建完 300 条才有第一条进 DOM）
+- 全量替换完成：**111ms**（旧 118ms）；600 个模组：299ms（旧 313ms）
+- 纯骨架渲染 `updateModIndex`：300 行 **4.4ms**、600 行 9.2ms
+- 后端：300 个 jar 元数据（含 4KB 图标）8 线程 **177ms**，顺序 3969ms；索引载荷 **15,490 B**，完整载荷 **1,740,650 B**
+
+**收益**：模组页首次可见时间从「等整轮扫描 + 整表构建」降到「等索引（约 10ms 级）」，冷缓存时差距最大；图标与版本号随后补位，不再阻塞首屏。
+
+**回归**：pytest **403 passed**（+3 `tests/test_mods_index.py`，含真实 bridge 线程链路的信号顺序断言）；node **19** 个文件 **1118 断言 0 失败**（+40 `tests/test_mod_list_phased.js`）；`py_compile` 67 文件；`node --check` 通过。
+
+### 启动/模组页卡顿：插件预加载移出主线程 + 图标压缩（2026-10-21）
+
+**现象**：主窗口出现后整段无响应，点模组页也要顿一下。
+
+**定位**（按 `logs/launcher.log` 相邻日志时间差找主线程空档，日志由调用线程同步写入，间隔即阻塞）：
+
+| 空档 | 位置 | 性质 |
+| --- | --- | --- |
+| 2753 ms | `plugin.mods-doctor 扫描完成` 之前 | `load_all()` 在 QTimer(0) 回调里同步跑，144 个模组 |
+| 201 ms | `modsLoaded` 之前 | 1.18MB 载荷 marshal |
+| 1154 ms | `WebChannel 设置完成` | 窗口出现前，启动画面已覆盖 |
+
+**改动**：
+- `main.py`：`_startup_load_plugins` 改为 `threading.Thread(name="plugin-preload", daemon=True)` 里跑 `load_all()`，并把调度从 `QTimer.singleShot(0, ...)` 推到 `singleShot(1500, ...)`——先让首帧和版本列表拿到干净的事件循环。跨线程的 `pluginsLoaded` 走 Qt 队列连接回到主线程，页面渲染不变。
+- `launcher_core/mod_manager.py`：新增 `_downscale_icon()`，用 QImage 把大于 72px 的图标按比例缩到 72px 再 base64（列表按 36 CSS px 显示，2x 屏也够清晰）；jar 内图标、Modrinth 图标缓存、网络下载三处都过这个函数，MIME 由实际字节头判定。
+- `main.py`：`_mod_cache_key` 前缀改 `v2|`，旧缓存里的未压缩大图标自动失效并重建一次（本次 45 个模组 401ms，后台线程完成）。
+
+**实测**（同一套真实模组目录，45 个 jar）：
+- 启动后主线程最长空档：**2753 ms → 无**（插件扫描改在 `plugin-preload` 线程，结束后日志 `plugin preload finished`）
+- 模组列表载荷：**1,182,839 B → 289,239 B**（其中图标 1,161,732 B → 268,132 B，4.1 倍）
+- 冷缓存重建：8 线程扫描 + 缩放 **401 ms**，期间索引已先到、列表照常显示骨架
+
+**回归**：pytest **411 passed**（+3 `tests/test_plugin_preload.py`、+5 `tests/test_mod_icon_downscale.py`）；node 19 文件 **1119 断言**；`py_compile` 69 文件；`node --check` 通过；`tests/test_plugins_ui.js` 的 M7 断言由「singleShot(0) 延后」改为「不得同步 + 至少延后 100ms」。
+
+### 模组页：骨架升级后配色一致 + 再次进入零重建（2026-10-22）
+
+**现象**：模组页里先渲染的前 15 条是白色名称，后补齐的卡片一直偏灰；每次点进模组页仍要卡几下。
+
+**定位**：
+- `upgradeModRow` 只用 `node.innerHTML` 换成完整内容，外层 `div` 上的 `mod-pending` class 从未移除，于是已升级的行继续命中 `.mod-item.mod-pending .mod-name { color: var(--text-muted); font-weight: 500 }`。索引骨架走的是「先建、后升级」，所以只有它们灰；前 15 条在构建时就是完整卡片，所以白。
+- `switchPage` 每次进入模组页都会用 `lastMods` 调 `renderModList`。旧实现一律整表重建：插入 45 行 → 再逐帧升级，外加图标解码，所以每切一次都连续掉帧。
+
+**改动**：
+- `upgradeModRow` 写入内容后同步 `node.className = cls.replace(/\s*mod-pending\b/g, '')`，颜色与字重在升级当帧恢复默认。
+- 新增 `modSameList(list, mods)`：children 数量与首末 `data-filename` 一致即认为顺序未变，复用现有节点、只逐帧升级，不再重写 `innerHTML`；若首行已无 `mod-pending`（上次已升级完），直接 return，重复进入页面 DOM 工作量为 0。
+- CSS：`.mod-item` 加 `content-visibility: auto; contain-intrinsic-size: auto 62px;`，屏外行不参与布局/绘制；`transition: all 0.2s` 收窄为 `background 0.2s, border-color 0.2s`，升级时不再连颜色和字重一起做过渡。
+
+**实测**（Playwright + msedge，真实 rAF/布局/图片解码；图标 6KB base64）：
+- 45 个模组（与真实实例一致）：索引骨架 2.2ms，完整列表调用 5.3ms，全程单帧 **33.5ms**，0 个 longtask
+- 300 个模组压测：最大帧 **58.9ms**（原 110.7ms），longtask **0**（原 1 次 53ms）
+- 升级完成后首行/末行 computed style 均为 `rgb(238, 238, 238) / 600`，`mod-pending` 残留 0 行
+- 再次进入模组页 `renderModList` 耗时 **0ms**，节点与内容完全不重写
+
+**回归**：pytest **411 passed**；node **19 文件 1133 断言 0 失败**（`tests/test_mod_list_phased.js` 40 → 54，新增「升级后无 pending」「复用节点不重建」「滚动保持」「重复进入零 DOM 工作」断言）；`py_compile` 69 文件；`node --check` 通过。

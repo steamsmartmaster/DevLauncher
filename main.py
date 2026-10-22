@@ -139,6 +139,7 @@ class LauncherBridge(QObject):
     # Signals
     versionsLoaded = pyqtSignal(str)
     modsLoaded = pyqtSignal(str)
+    modsIndex = pyqtSignal(str)  # fast filename-only list, emitted before metadata scan
     worldsLoaded = pyqtSignal(str)
     resourcepacksLoaded = pyqtSignal(str)
     versionIsolationStatus = pyqtSignal(str)
@@ -2485,7 +2486,8 @@ class LauncherBridge(QObject):
             if name.endswith(".disabled"):
                 name = name[:-len(".disabled")]
             st = jar.stat()
-            return f"{name}|{st.st_size}|{int(st.st_mtime)}"
+            # "v2": icons are downscaled now; old entries hold huge base64 blobs
+            return f"v2|{name}|{st.st_size}|{int(st.st_mtime)}"
         except OSError:
             return None
 
@@ -2534,7 +2536,19 @@ class LauncherBridge(QObject):
                         for item in fabric_mods.iterdir():
                             if item.is_file() and item.suffix == ".jar":
                                 jar_files.append(item)
-                
+
+                # Fast path: emit filename-only index immediately so the UI can
+                # paint skeleton rows while jar metadata/icons are still loading.
+                if jar_files:
+                    try:
+                        index = [
+                            {"filename": j.name, "enabled": not j.name.endswith(".disabled")}
+                            for j in jar_files
+                        ]
+                        self.modsIndex.emit(json.dumps(index, ensure_ascii=False))
+                    except Exception as e:
+                        logger.debug(f"mods index emit failed: {e}")
+
                 # Use ModInfo to extract metadata (parallel + persistent cache,
                 # because each jar is unzipped twice: metadata + icon)
                 from launcher_core.mod_manager import ModInfo
@@ -2902,6 +2916,7 @@ class MainWindow(QMainWindow):
         # Connect signals (bridge is initialized by HTML via QWebChannel)
         self.bridge.versionsLoaded.connect(self._on_versions_loaded)
         self.bridge.modsLoaded.connect(self._on_mods_loaded)
+        self.bridge.modsIndex.connect(self._on_mods_index)
         self.bridge.worldsLoaded.connect(self._on_worlds_loaded)
         self.bridge.resourcepacksLoaded.connect(self._on_resourcepacks_loaded)
         self.bridge.versionIsolationStatus.connect(self._on_version_isolation_status)
@@ -2938,21 +2953,37 @@ class MainWindow(QMainWindow):
         self.bridge.skinFileSelected.connect(self._on_skin_file_selected)
 
         # 启动加载启用中的插件 (M7: 延后到事件循环 + 兜底, 插件异常不崩启动)
-        QTimer.singleShot(0, self._startup_load_plugins)
+        # Let the first paint and version list settle, then preload plugins
+        # off-thread so plugin scanning never freezes the UI.
+        QTimer.singleShot(1500, self._startup_load_plugins)
         
         # Login status will be checked after JS bridge is ready (via HTML callback)
         logger.info("MainWindow 初始化完成")
 
     def _startup_load_plugins(self):
-        try:
-            self.bridge.plugins.load_all()
-        except Exception:
-            logger.error("插件预加载失败", exc_info=True)
+        # Plugin load_all() runs every plugin's on_load() hook on this thread.
+        # With 144 mods, mods-doctor alone blocked the event loop for ~2.7s right
+        # after the window appeared, so the UI felt frozen while "loading".
+        def _work():
+            try:
+                self.bridge.plugins.load_all()
+            except Exception:
+                logger.error("plugin preload failed", exc_info=True)
+            else:
+                logger.info("plugin preload finished")
+
+        threading.Thread(target=_work, name="plugin-preload", daemon=True).start()
 
     def _on_versions_loaded(self, versions_json: str):
         logger.info(f"信号: versionsLoaded (长度: {len(versions_json)})")
         self.web_view.page().runJavaScript(
             f"updateVersionList({versions_json})"
+        )
+
+    def _on_mods_index(self, index_json: str):
+        logger.info(f"signal: modsIndex (size: {len(index_json)})")
+        self.web_view.page().runJavaScript(
+            f"updateModIndex({index_json})"
         )
 
     def _on_mods_loaded(self, mods_json: str):
@@ -3180,7 +3211,7 @@ class MainWindow(QMainWindow):
             f"setBackground('{path}')"
         )
 
-def main():
+def main(app=None, splash=None):
     for key in list(os.environ.keys()):
         if key.lower() in ('http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'http_proxy_upper', 'https_proxy_upper'):
             logger.info(f"清除代理环境变量: {key}={os.environ[key]}")
@@ -3194,12 +3225,22 @@ def main():
     logger.info(f"工作目录: {os.getcwd()}")
     logger.info("=" * 50)
     
-    app = QApplication(sys.argv)
+    if app is None:
+        app = QApplication(sys.argv)
     app.setApplicationName("DevLauncher")
-    
+
+    if splash is not None:
+        splash.set_status("正在初始化账户与版本…")
     window = MainWindow()
+
+    if splash is not None:
+        splash.set_status("正在加载界面…")
     window.show()
-    
+
+    if splash is not None:
+        window.web_view.loadFinished.connect(lambda *_: splash.finish())
+        QTimer.singleShot(6000, splash.finish)
+
     logger.info("主窗口已显示")
     sys.exit(app.exec())
 

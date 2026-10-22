@@ -492,3 +492,48 @@
 - [ ] `node tests/test_launch_detail.js` 38 PASS / 0 FAIL
 - [ ] 全量门禁：`python -m pytest tests -q`（395 passed）+ 18 个 node 测试（1078 断言）+ `py_compile`（63 文件）+ `node --check` 全绿
 - [ ] 英文模式下面板标题显示 `Launch details`；`collect.py` + `build.py` 可重复生成同一份 `ui/i18n_dict.js`
+
+## 45 启动速度与启动画面
+
+- [ ] 解压 zip 后进入 `DevLauncher\` 目录双击 `DevLauncher.exe`；1s 内出现 460×172 深色启动卡片，不是空白
+- [ ] 卡片依次显示「正在加载运行库…」→「正在初始化账户与版本…」→「正在加载界面…」，进度条为不定态动画
+- [ ] 主窗口出现后启动卡片自动关闭，不残留、不遮挡、不抢焦点
+- [ ] 热启动（文件已缓存）双击到主窗口 < 2s；冷启动 < 3s（改前约 8s）
+- [ ] 卡片四角为圆角，无黑色直角边
+- [ ] 删除或改名 `_internal\` 后启动应失败并把 traceback 写入 `logs/launcher.log`，不静默退出
+- [ ] `dist\DevLauncher\` 下不存在 `_MEI*` 临时解包目录（onedir 不解包）
+- [ ] 冒烟：`build_exe.ps1` 末行 `BUILD OK: dist\DevLauncher\DevLauncher.exe + ...`，日志含 `versionsLoaded`
+- [ ] `python -m pytest tests/test_startup_splash.py -q` → 5 passed
+- [ ] 全量门禁：pytest **400 passed** + 18 个 node 文件 **1078 断言** + `py_compile` 66 文件 + `node --check`
+## 46 模组列表渐进渲染
+
+- [ ] 打开模组页（300+ 模组）：首屏立刻出现前 15 条完整卡片（真实名称 + 图标 + 版本号）
+- [ ] 其余卡片先以文件名 + 灰色占位图标出现，快速滚动到底部不出现长时间空白
+- [ ] 1 秒内全部卡片替换为真实名称/版本号/图标，顺序与原列表一致，无重复行
+- [ ] 冷启动（删除 `modcache.json`）时骨架先出现，不必等 jar 扫描结束
+- [ ] 骨架状态下启用/禁用勾选与删除按钮仍可用
+- [ ] 搜索或过滤触发重渲染时不闪烁，滚动位置保持
+- [ ] `node tests/test_mod_list_phased.js` 40 通过 / 0 失败
+- [ ] `python -m pytest tests/test_mods_index.py -q` 3 passed
+- [ ] 全量门禁：pytest **403 passed** + 19 个 node 文件 **1118 断言** + `py_compile` 67 文件 + `node --check`
+
+## 47 启动与模组页卡顿
+
+- [ ] 主窗口出现后立刻拖动/滚动/点侧边栏，全程不出现整段无响应（原 2.7s 冻结）
+- [ ] 启动约 1.5s 后才开始插件预加载，插件页数据照常出现
+- [ ] 在模组页与设置页之间来回切换，插件预加载期间界面仍可操作
+- [ ] 首次打开某个版本模组页（缓存为 v2 前）：先出文件名骨架，约 0.4s 后补齐图标与版本号
+- [ ] 模组图标清晰不发虚（72px 源、36px 显示，2x 屏正常）
+- [ ] 切换启用/禁用后列表不重扫全部 jar（命中 v2 缓存）
+- [ ] `python -m pytest tests/test_plugin_preload.py tests/test_mod_icon_downscale.py -q` 8 passed
+- [ ] 全量门禁：pytest **411 passed** + 19 个 node 文件 **1119 断言** + `py_compile` 69 文件 + `node --check`
+
+## 48 模组页配色一致与重复进入
+
+- [ ] 点进模组页：先出现的前 15 条与随后补齐的卡片，名称颜色、字重完全一致，没有一片偏灰
+- [ ] 补齐过程中不会整表闪一下，滚动位置不跳
+- [ ] 切到别的页面再切回模组页：不再卡顿（重复进入 0 DOM 重建）
+- [ ] 模组页里快速上下滚动，屏外卡片不拖慢滚动（content-visibility）
+- [ ] 搜索过滤后颜色仍一致；过滤回空再清空搜索，卡片正常
+- [ ] `node tests/test_mod_list_phased.js` 54 通过 / 0 失败
+- [ ] 全量门禁：pytest **411 passed** + 19 个 node 文件 **1133 断言** + `py_compile` 69 文件 + `node --check`

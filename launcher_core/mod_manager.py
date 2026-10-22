@@ -13,6 +13,38 @@ import requests
 logger = logging.getLogger("DevLauncher")
 
 
+def _downscale_icon(raw: bytes, size: int = 72) -> bytes:
+    """Shrink a mod icon before it goes into the JSON payload.
+
+    Many mod icons are 256-512px PNGs; base64 of the original made a single
+    version's mod list ~1.2MB and cost a decode hitch per card. The list shows
+    icons at 36 CSS px, so 72px keeps them sharp on HiDPI while cutting the
+    payload roughly 5x. Returns the original bytes if anything fails.
+    """
+    try:
+        from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, Qt
+        from PyQt6.QtGui import QImage
+
+        img = QImage.fromData(raw)
+        if img.isNull() or max(img.width(), img.height()) <= size:
+            return raw
+        small = img.scaled(
+            size, size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        ba = QByteArray()
+        buf = QBuffer(ba)
+        if not buf.open(QIODevice.OpenModeFlag.WriteOnly):
+            return raw
+        ok = small.save(buf, "PNG")
+        buf.close()
+        data = bytes(ba)
+        return data if ok and data else raw
+    except Exception:
+        return raw
+
+
 class ModInfo:
     """Information about a mod"""
     
@@ -195,9 +227,12 @@ class ModInfo:
                     for name in namelist:
                         if name.lower() == icon_path.lower() or name == icon_path:
                             if name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
-                                icon_data = zf.read(name)
-                                ext = name.rsplit('.', 1)[-1].lower()
-                                mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif"}.get(ext, "image/png")
+                                icon_data = _downscale_icon(zf.read(name))
+                                if icon_data[:8] == b"\x89PNG\r\n\x1a\n":
+                                    mime = "image/png"
+                                else:
+                                    ext = name.rsplit('.', 1)[-1].lower()
+                                    mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif"}.get(ext, "image/png")
                                 return f"data:{mime};base64,{base64.b64encode(icon_data).decode()}"
         except Exception as e:
             logger.debug(f"无法读取模组图标 {self.filename}: {e}")
@@ -217,7 +252,7 @@ class ModInfo:
         
         if cache_file.exists():
             try:
-                icon_data = cache_file.read_bytes()
+                icon_data = _downscale_icon(cache_file.read_bytes())
                 return f"data:image/png;base64,{base64.b64encode(icon_data).decode()}"
             except Exception:
                 pass
@@ -236,7 +271,7 @@ class ModInfo:
                 if icon_url:
                     icon_resp = requests.get(icon_url, timeout=10)
                     if icon_resp.status_code == 200:
-                        icon_data = icon_resp.content
+                        icon_data = _downscale_icon(icon_resp.content)
                         cache_file.write_bytes(icon_data)
                         logger.debug(f"  -> Modrinth icon cached: {self.mod_id}")
                         return f"data:image/png;base64,{base64.b64encode(icon_data).decode()}"

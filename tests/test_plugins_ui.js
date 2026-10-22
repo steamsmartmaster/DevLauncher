@@ -116,8 +116,10 @@ check(up !== null && up.indexOf('errorOccurred.emit("卸载失败")') >= 0,
 
 // ================= M7. 启动健壮性 =================
 section('静态: M7 启动 load_all 延后 + try/except');
-check(/QTimer\.singleShot\(0,\s*self\._startup_load_plugins\)/.test(py),
-  '启动 load_all 应经 QTimer.singleShot(0, self._startup_load_plugins) 延后');
+check(!/QTimer\.singleShot\(0,\s*self\._startup_load_plugins\)/.test(py),
+  '插件 load_all 不得在 singleShot(0) 里同步执行（会冻住 UI）');
+check(/QTimer\.singleShot\(\d{3,},\s*self\._startup_load_plugins\)/.test(py),
+  '插件 load_all 应延后到 singleShot(>=100ms) 后启动');
 {
   const slp = extractMethod('_startup_load_plugins');
   check(slp !== null && slp.indexOf('load_all()') >= 0 &&

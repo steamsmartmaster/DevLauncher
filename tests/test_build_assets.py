@@ -28,7 +28,7 @@ def test_version_info_resource():
     vf = REPO_ROOT / "version_info.txt"
     assert vf.exists(), "缺少 version_info.txt"
     text = vf.read_text(encoding="utf-8")
-    assert "FileVersion" in text and "1.2.0.0" in text
+    assert "FileVersion" in text and "1.2.1.0" in text
     assert "ProductName" in text and "DevLauncher" in text
     assert "OriginalFilename" in text and "DevLauncher.exe" in text
 
@@ -37,8 +37,8 @@ def test_build_script_wiring():
     script = REPO_ROOT / "build_exe.ps1"
     assert script.exists(), "缺少 build_exe.ps1"
     text = script.read_text(encoding="utf-8")
-    for flag in ("--onefile", "--windowed", "--name DevLauncher",
-                 "--icon", "--version-file", '--add-data "ui;ui"'):
+    for flag in ("--onedir", "--windowed", "--name DevLauncher",
+                 "--icon", "--version-file", '--add-data "ui;ui"', "boot.py"):
         assert flag in text, f"构建脚本缺 {flag}"
     assert "DevLauncher-b1.1-win64.zip" in text or "win64.zip" in text, "未产出发布 zip"
     assert "make_icon.py" in text, "未接图标生成"
